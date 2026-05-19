@@ -21,6 +21,18 @@ curate safe repo context
   -> accept, defer, reject, or implement deliberately
 ```
 
+## Collaboration Model
+
+This skill is built around a three-role workflow:
+
+```text
+Codex = implementer + repo operator
+Claude = outside reviewer + strategist + red-team peer
+User = product owner + final decision-maker
+```
+
+Claude proposes candidates and critiques. Codex verifies them against the repository, applies changes when appropriate, and explains what was accepted, deferred, or rejected. The user keeps product judgment and final direction.
+
 ## Why This Skill Exists
 
 Using another model as a peer reviewer can be valuable, but only if the workflow is controlled. This skill helps Codex:
