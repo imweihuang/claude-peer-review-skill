@@ -30,6 +30,22 @@ Choose one mode before building context:
 
 Prefer one focused mode. Combine modes only when the user explicitly asks for a broad review.
 
+## Model and Effort Defaults
+
+Default Claude peer reviews to Opus 4.7 adaptive reasoning at max effort when the installed Claude CLI and account allow it:
+
+- Model: `claude-opus-4-7`
+- Effort: `max`
+- Budget: `3` USD unless the task context or user request justifies a different cap
+
+Use per-request environment overrides when needed:
+
+- `CLAUDE_PEER_REVIEW_MODEL` for model ID or alias
+- `CLAUDE_PEER_REVIEW_EFFORT` for `low`, `medium`, `high`, `xhigh`, or `max`
+- `CLAUDE_PEER_REVIEW_MAX_BUDGET_USD` for print-mode spend cap
+
+Do not silently downgrade to Sonnet or lower effort. If Opus 4.7 or max effort is unavailable, report that external review could not run under the requested settings and ask before using a fallback.
+
 ## Workflow
 
 1. Define the review target.
@@ -67,16 +83,28 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/claude-peer-review/scripts/build_rev
 ```bash
 tmp_prompt="$(mktemp)"
 tmp_context="$(mktemp)"
+review_model="${CLAUDE_PEER_REVIEW_MODEL:-claude-opus-4-7}"
+review_effort="${CLAUDE_PEER_REVIEW_EFFORT:-max}"
+review_budget="${CLAUDE_PEER_REVIEW_MAX_BUDGET_USD:-3}"
 cat > "$tmp_prompt" <<'PROMPT'
 <prompt>
 PROMPT
 python3 "${CODEX_HOME:-$HOME/.codex}/skills/claude-peer-review/scripts/build_review_context.py" <files...> > "$tmp_context"
-cat "$tmp_prompt" "$tmp_context" | claude -p --tools "" --no-session-persistence --model sonnet --max-budget-usd 3
+cat "$tmp_prompt" "$tmp_context" | \
+  ANTHROPIC_MODEL="$review_model" CLAUDE_CODE_EFFORT_LEVEL="$review_effort" \
+  claude -p \
+    --tools "" \
+    --no-session-persistence \
+    --model "$review_model" \
+    --effort "$review_effort" \
+    --max-budget-usd "$review_budget"
 rm -f "$tmp_prompt" "$tmp_context"
 ```
 
    - Keep the review prompt and curated file context in the same stdin stream.
-   - Use a full Claude model ID instead of the `sonnet` alias when reproducibility matters.
+   - The default full model ID is intentional for reproducibility. Override it only when the user requests a different model or the account cannot run it.
+   - The command sets `ANTHROPIC_MODEL` and `CLAUDE_CODE_EFFORT_LEVEL` for the child process so inherited lower-quality settings do not override the intended review settings.
+   - Opus 4.7 uses adaptive reasoning; use `--effort` to control reasoning depth instead of legacy fixed thinking budget variables.
    - If Claude CLI is unavailable, tell the user external review is unavailable. Do not present a self-review as a Claude peer review.
 
 5. Validate findings before acting.
@@ -118,6 +146,7 @@ Keep the bundle small enough for the external reviewer to reason over. A sharper
 - Do not run external tools with filesystem permissions unless the user explicitly asks and the review requires it.
 - Prefer `--tools ""` for Claude CLI review.
 - Prefer `--no-session-persistence` for one-off external reviews.
+- Prefer the default `claude-opus-4-7 --effort max` settings for the highest-quality review. Use `xhigh` only when the user asks to reduce cost/latency or max effort is unavailable.
 - Do not use `--allow-untracked` until you personally inspect the untracked files.
 - Remember that tracked does not mean secret-free; inspect the `--list` output and be cautious with config files.
 - `--max-budget-usd 3` is only a default example. Adjust it for context size and user preference.
