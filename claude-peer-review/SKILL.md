@@ -32,9 +32,9 @@ Prefer one focused mode. Combine modes only when the user explicitly asks for a 
 
 ## Model and Effort Defaults
 
-Default Claude peer reviews to Opus 4.7 adaptive reasoning at xHigh effort when the installed Claude CLI and account allow it:
+Default Claude peer reviews to Opus 4.8 adaptive reasoning at xHigh effort when the installed Claude CLI and account allow it:
 
-- Model: `claude-opus-4-7`
+- Model: `claude-opus-4-8`
 - Effort: `xhigh`
 - Budget: `3` USD unless the task context or user request justifies a different cap
 
@@ -45,7 +45,7 @@ Use per-request environment overrides when needed:
 - `CLAUDE_PEER_REVIEW_MAX_BUDGET_USD` for print-mode spend cap
 - `CLAUDE_PEER_REVIEW_TOOLS` for an explicit Claude CLI tool allowlist; defaults to empty, which disables tools
 
-Do not silently downgrade to Sonnet or lower effort. If Opus 4.7 or xHigh effort is unavailable, report that external review could not run under the requested settings and ask before using a fallback.
+Do not silently downgrade to Sonnet or lower effort. If Opus 4.8 or xHigh effort is unavailable, report that external review could not run under the requested settings and ask before using a fallback.
 
 ## Tool Policy
 
@@ -100,7 +100,7 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/claude-peer-review/scripts/build_rev
 ```bash
 tmp_prompt="$(mktemp)"
 tmp_context="$(mktemp)"
-review_model="${CLAUDE_PEER_REVIEW_MODEL:-claude-opus-4-7}"
+review_model="${CLAUDE_PEER_REVIEW_MODEL:-claude-opus-4-8}"
 review_effort="${CLAUDE_PEER_REVIEW_EFFORT:-xhigh}"
 review_budget="${CLAUDE_PEER_REVIEW_MAX_BUDGET_USD:-3}"
 review_tools="${CLAUDE_PEER_REVIEW_TOOLS:-}"
@@ -123,7 +123,7 @@ rm -f "$tmp_prompt" "$tmp_context"
    - Keep `review_tools` empty unless the user explicitly approved an allowlist for the current review.
    - The default full model ID is intentional for reproducibility. Override it only when the user requests a different model or the account cannot run it.
    - The command sets `ANTHROPIC_MODEL` and `CLAUDE_CODE_EFFORT_LEVEL` for the child process so inherited lower-quality settings do not override the intended review settings.
-   - Opus 4.7 uses adaptive reasoning; use `--effort` to control reasoning depth instead of legacy fixed thinking budget variables.
+   - Opus 4.8 uses adaptive reasoning; use `--effort` to control reasoning depth instead of legacy fixed thinking budget variables.
    - If Claude CLI is unavailable, tell the user external review is unavailable. Do not present a self-review as a Claude peer review.
 
 5. Validate findings before acting.
@@ -168,7 +168,7 @@ Keep the bundle small enough for the external reviewer to reason over. A sharper
 - Use `Read,Grep,Glob` only for approved read-only repo exploration in a trusted checkout.
 - Do not enable edit/write tools for this skill.
 - Prefer `--no-session-persistence` for one-off external reviews.
-- Prefer the default `claude-opus-4-7 --effort xhigh` settings for high-quality review. Use `max` only when the user explicitly asks for maximum available reasoning and cost/latency are acceptable.
+- Prefer the default `claude-opus-4-8 --effort xhigh` settings for high-quality review. Use `max` only when the user explicitly asks for maximum available reasoning and cost/latency are acceptable.
 - Do not use `--allow-untracked` until you personally inspect the untracked files.
 - Remember that tracked does not mean secret-free; inspect the `--list` output and be cautious with config files.
 - `--max-budget-usd 3` is only a default example. Adjust it for context size and user preference.
