@@ -32,10 +32,10 @@ Prefer one focused mode. Combine modes only when the user explicitly asks for a 
 
 ## Model and Effort Defaults
 
-Default Claude peer reviews to Opus 4.7 adaptive reasoning at max effort when the installed Claude CLI and account allow it:
+Default Claude peer reviews to Opus 4.7 adaptive reasoning at xHigh effort when the installed Claude CLI and account allow it:
 
 - Model: `claude-opus-4-7`
-- Effort: `max`
+- Effort: `xhigh`
 - Budget: `3` USD unless the task context or user request justifies a different cap
 
 Use per-request environment overrides when needed:
@@ -44,7 +44,7 @@ Use per-request environment overrides when needed:
 - `CLAUDE_PEER_REVIEW_EFFORT` for `low`, `medium`, `high`, `xhigh`, or `max`
 - `CLAUDE_PEER_REVIEW_MAX_BUDGET_USD` for print-mode spend cap
 
-Do not silently downgrade to Sonnet or lower effort. If Opus 4.7 or max effort is unavailable, report that external review could not run under the requested settings and ask before using a fallback.
+Do not silently downgrade to Sonnet or lower effort. If Opus 4.7 or xHigh effort is unavailable, report that external review could not run under the requested settings and ask before using a fallback.
 
 ## Workflow
 
@@ -84,7 +84,7 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/claude-peer-review/scripts/build_rev
 tmp_prompt="$(mktemp)"
 tmp_context="$(mktemp)"
 review_model="${CLAUDE_PEER_REVIEW_MODEL:-claude-opus-4-7}"
-review_effort="${CLAUDE_PEER_REVIEW_EFFORT:-max}"
+review_effort="${CLAUDE_PEER_REVIEW_EFFORT:-xhigh}"
 review_budget="${CLAUDE_PEER_REVIEW_MAX_BUDGET_USD:-3}"
 cat > "$tmp_prompt" <<'PROMPT'
 <prompt>
@@ -146,7 +146,7 @@ Keep the bundle small enough for the external reviewer to reason over. A sharper
 - Do not run external tools with filesystem permissions unless the user explicitly asks and the review requires it.
 - Prefer `--tools ""` for Claude CLI review.
 - Prefer `--no-session-persistence` for one-off external reviews.
-- Prefer the default `claude-opus-4-7 --effort max` settings for the highest-quality review. Use `xhigh` only when the user asks to reduce cost/latency or max effort is unavailable.
+- Prefer the default `claude-opus-4-7 --effort xhigh` settings for high-quality review. Use `max` only when the user explicitly asks for maximum available reasoning and cost/latency are acceptable.
 - Do not use `--allow-untracked` until you personally inspect the untracked files.
 - Remember that tracked does not mean secret-free; inspect the `--list` output and be cautious with config files.
 - `--max-budget-usd 3` is only a default example. Adjust it for context size and user preference.
