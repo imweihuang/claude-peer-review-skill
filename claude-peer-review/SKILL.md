@@ -43,8 +43,24 @@ Use per-request environment overrides when needed:
 - `CLAUDE_PEER_REVIEW_MODEL` for model ID or alias
 - `CLAUDE_PEER_REVIEW_EFFORT` for `low`, `medium`, `high`, `xhigh`, or `max`
 - `CLAUDE_PEER_REVIEW_MAX_BUDGET_USD` for print-mode spend cap
+- `CLAUDE_PEER_REVIEW_TOOLS` for an explicit Claude CLI tool allowlist; defaults to empty, which disables tools
 
 Do not silently downgrade to Sonnet or lower effort. If Opus 4.7 or xHigh effort is unavailable, report that external review could not run under the requested settings and ask before using a fallback.
+
+## Tool Policy
+
+Default peer reviews run with no Claude tools: `CLAUDE_PEER_REVIEW_TOOLS=""`. This keeps Claude limited to the curated context bundle and prevents accidental extra file reads, shell commands, edits, or secret exposure.
+
+Enable tools only when the review genuinely needs them:
+
+| Tool set | Use for | Notes |
+| --- | --- | --- |
+| empty string | Standard repo, code, architecture, launch-readiness, and coverage reviews | Default and safest |
+| `WebSearch,WebFetch` | Current external facts: competitor research, latest docs, CVEs, pricing, vendor/platform changes | Do not include private project details in search terms unless the user approves |
+| `Read,Grep,Glob` | Large read-only repo reviews where curated context is insufficient | Use only with explicit user approval and a trusted checkout |
+| `Read,Grep,Glob,WebSearch,WebFetch` | Mixed repo plus current external research | Still read-only |
+
+Do not enable `Edit`, write tools, or broad shell access for this skill. Enable `Bash` only when the user explicitly asks Claude to run verification commands, and keep Codex responsible for validating the results.
 
 ## Workflow
 
@@ -73,6 +89,7 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/claude-peer-review/scripts/build_rev
 3. Prepare the external-review prompt.
    - Read `references/prompt-template.md` when writing or adapting the prompt.
    - State the chosen review mode and current milestone.
+   - State the Claude tool policy: no tools by default, or the exact approved tool allowlist.
    - Require file-grounded, ranked feedback.
    - Require "must fix now" versus "defer" separation.
    - Forbid secret inspection and file edits.
@@ -86,6 +103,7 @@ tmp_context="$(mktemp)"
 review_model="${CLAUDE_PEER_REVIEW_MODEL:-claude-opus-4-7}"
 review_effort="${CLAUDE_PEER_REVIEW_EFFORT:-xhigh}"
 review_budget="${CLAUDE_PEER_REVIEW_MAX_BUDGET_USD:-3}"
+review_tools="${CLAUDE_PEER_REVIEW_TOOLS:-}"
 cat > "$tmp_prompt" <<'PROMPT'
 <prompt>
 PROMPT
@@ -93,7 +111,7 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/claude-peer-review/scripts/build_rev
 cat "$tmp_prompt" "$tmp_context" | \
   ANTHROPIC_MODEL="$review_model" CLAUDE_CODE_EFFORT_LEVEL="$review_effort" \
   claude -p \
-    --tools "" \
+    --tools "$review_tools" \
     --no-session-persistence \
     --model "$review_model" \
     --effort "$review_effort" \
@@ -102,6 +120,7 @@ rm -f "$tmp_prompt" "$tmp_context"
 ```
 
    - Keep the review prompt and curated file context in the same stdin stream.
+   - Keep `review_tools` empty unless the user explicitly approved an allowlist for the current review.
    - The default full model ID is intentional for reproducibility. Override it only when the user requests a different model or the account cannot run it.
    - The command sets `ANTHROPIC_MODEL` and `CLAUDE_CODE_EFFORT_LEVEL` for the child process so inherited lower-quality settings do not override the intended review settings.
    - Opus 4.7 uses adaptive reasoning; use `--effort` to control reasoning depth instead of legacy fixed thinking budget variables.
@@ -143,8 +162,11 @@ Keep the bundle small enough for the external reviewer to reason over. A sharper
 ## Safety Rules
 
 - Do not send `.env`, `.env.*`, secret stores, key files, local databases, logs, caches, or build artifacts to an external model.
-- Do not run external tools with filesystem permissions unless the user explicitly asks and the review requires it.
+- Do not run external tools with filesystem, shell, or web permissions unless the user explicitly asks and the review requires it.
 - Prefer `--tools ""` for Claude CLI review.
+- Use `WebSearch,WebFetch` only for current external facts such as competitor research, latest docs, CVEs, pricing, or vendor/platform changes.
+- Use `Read,Grep,Glob` only for approved read-only repo exploration in a trusted checkout.
+- Do not enable edit/write tools for this skill.
 - Prefer `--no-session-persistence` for one-off external reviews.
 - Prefer the default `claude-opus-4-7 --effort xhigh` settings for high-quality review. Use `max` only when the user explicitly asks for maximum available reasoning and cost/latency are acceptable.
 - Do not use `--allow-untracked` until you personally inspect the untracked files.

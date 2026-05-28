@@ -88,13 +88,36 @@ Use $claude-peer-review to evaluate this PR-like diff for correctness bugs and m
 
 If Claude CLI is unavailable, the skill instructs Codex to say so rather than pretending an internal self-review is a Claude review.
 
-By default, live reviews run Claude Code in print mode with tools disabled, `claude-opus-4-7`, max effort, no session persistence, and a 3 USD budget cap. Override a single request with:
+By default, live reviews run Claude Code in print mode with tools disabled, `claude-opus-4-7`, xHigh effort, no session persistence, and a 3 USD budget cap. Override a single request with:
 
 ```bash
 CLAUDE_PEER_REVIEW_MODEL=claude-opus-4-7 \
-CLAUDE_PEER_REVIEW_EFFORT=max \
+CLAUDE_PEER_REVIEW_EFFORT=xhigh \
 CLAUDE_PEER_REVIEW_MAX_BUDGET_USD=3
 ```
+
+## Optional Tools
+
+The safest default is no Claude tools:
+
+```bash
+CLAUDE_PEER_REVIEW_TOOLS=""
+```
+
+Enable tools only for the current review when the user explicitly approves the need:
+
+```bash
+# Current external facts: competitors, latest docs, CVEs, pricing, vendor changes.
+CLAUDE_PEER_REVIEW_TOOLS="WebSearch,WebFetch"
+
+# Large read-only repo review when curated context is not enough.
+CLAUDE_PEER_REVIEW_TOOLS="Read,Grep,Glob"
+
+# Mixed current-info plus read-only repo exploration.
+CLAUDE_PEER_REVIEW_TOOLS="Read,Grep,Glob,WebSearch,WebFetch"
+```
+
+Do not enable edit/write tools for this skill. Enable `Bash` only when the user explicitly wants Claude to run verification commands; Codex still owns validation and final edits.
 
 ## Safety Model
 
