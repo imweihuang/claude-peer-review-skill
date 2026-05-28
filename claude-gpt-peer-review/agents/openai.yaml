@@ -1,0 +1,4 @@
+interface:
+  display_name: "Claude + GPT Peer Review"
+  short_description: "Run dual-model peer reviews"
+  default_prompt: "Use $claude-gpt-peer-review to run independent Claude and GPT peer reviews of this repository."

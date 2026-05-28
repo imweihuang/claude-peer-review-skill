@@ -1,8 +1,12 @@
-# Claude Peer Review Skill
+# Peer Review Skills
 
-`claude-peer-review` is a Codex skill for running Claude CLI as a safe external peer reviewer for a software project.
+This repository contains Codex skills for running safe external peer reviews of software projects:
 
-It is useful for:
+- `claude-peer-review`: run Claude CLI as a peer reviewer.
+- `gpt-peer-review`: run Codex CLI with GPT-5.5 as a peer reviewer.
+- `claude-gpt-peer-review`: run independent Claude and GPT reviews, then have Codex reconcile and validate the findings.
+
+They are useful for:
 
 - code audits
 - architecture reviews
@@ -27,23 +31,24 @@ This skill is built around a three-role workflow:
 
 ```text
 Codex = implementer + repo operator
-Claude = outside reviewer + strategist + red-team peer
+External model = outside reviewer + strategist + red-team peer
 User = product owner + final decision-maker
 ```
 
-Claude proposes candidates and critiques. Codex verifies them against the repository, applies changes when appropriate, and explains what was accepted, deferred, or rejected. The user keeps product judgment and final direction.
+The external reviewers propose candidates and critiques. Codex verifies them against the repository, applies changes when appropriate, and explains what was accepted, deferred, or rejected. The user keeps product judgment and final direction.
 
 ## Why This Skill Exists
 
-Using another model as a peer reviewer can be valuable, but only if the workflow is controlled. This skill helps Codex:
+Using another model as a peer reviewer can be valuable, but only if the workflow is controlled. These skills help Codex:
 
 - avoid sending `.env`, keys, logs, local databases, caches, and build artifacts
 - keep Claude's filesystem tools disabled by default
+- keep GPT reviews in a temporary empty working directory by default
 - ask for file-grounded findings
 - separate must-fix items from strategic improvements
-- validate Claude's suggestions before changing code
+- validate external suggestions before changing code
 
-Claude is treated as an advisor, not an authority.
+External models are treated as advisors, not authorities.
 
 ## Install
 
@@ -53,6 +58,13 @@ In Codex, ask:
 Install the Codex skill from https://github.com/imweihuang/claude-peer-review-skill/tree/main/claude-peer-review
 ```
 
+Or install the GPT and dual-review skills:
+
+```text
+Install the Codex skill from https://github.com/imweihuang/claude-peer-review-skill/tree/main/gpt-peer-review
+Install the Codex skill from https://github.com/imweihuang/claude-peer-review-skill/tree/main/claude-gpt-peer-review
+```
+
 Then restart Codex so the new skill is discovered.
 
 Manual install:
@@ -60,12 +72,22 @@ Manual install:
 ```bash
 mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
 cp -R claude-peer-review "${CODEX_HOME:-$HOME/.codex}/skills/"
+cp -R gpt-peer-review "${CODEX_HOME:-$HOME/.codex}/skills/"
+cp -R claude-gpt-peer-review "${CODEX_HOME:-$HOME/.codex}/skills/"
 ```
 
 ## Usage Examples
 
 ```text
 Use $claude-peer-review to run Claude as a code-audit peer on this repo.
+```
+
+```text
+Use $gpt-peer-review to run GPT-5.5 as a code-audit peer on this repo.
+```
+
+```text
+Use $claude-gpt-peer-review to ask both Claude and GPT for independent production-readiness reviews.
 ```
 
 ```text
@@ -84,16 +106,32 @@ Use $claude-peer-review to evaluate this PR-like diff for correctness bugs and m
 
 - Codex with skills enabled
 - Claude CLI installed and authenticated for live Claude reviews
+- Codex CLI installed and authenticated for live GPT reviews
 - Git installed for tracked-file context selection
 
-If Claude CLI is unavailable, the skill instructs Codex to say so rather than pretending an internal self-review is a Claude review.
+If a required CLI is unavailable, the skills instruct Codex to say so rather than pretending an internal self-review is an external review.
 
-By default, live reviews run Claude Code in print mode with tools disabled, `claude-opus-4-8`, xHigh effort, no session persistence, and a 3 USD budget cap. Override a single request with:
+Default reviewer models:
+
+| Skill | Reviewer Defaults |
+| --- | --- |
+| `claude-peer-review` | `claude-opus-4-8`, xHigh effort, tools disabled, no session persistence, 3 USD default cap |
+| `gpt-peer-review` | `gpt-5.5`, xHigh effort, temporary empty working directory, read-only sandbox |
+| `claude-gpt-peer-review` | Claude `claude-opus-4-7` xHigh and GPT `gpt-5.5` xHigh |
+
+Override a Claude-only request with:
 
 ```bash
 CLAUDE_PEER_REVIEW_MODEL=claude-opus-4-8 \
 CLAUDE_PEER_REVIEW_EFFORT=xhigh \
 CLAUDE_PEER_REVIEW_MAX_BUDGET_USD=3
+```
+
+Override a GPT-only request with:
+
+```bash
+GPT_PEER_REVIEW_MODEL=gpt-5.5 \
+GPT_PEER_REVIEW_EFFORT=xhigh
 ```
 
 ## Optional Tools
@@ -117,7 +155,7 @@ CLAUDE_PEER_REVIEW_TOOLS="Read,Grep,Glob"
 CLAUDE_PEER_REVIEW_TOOLS="Read,Grep,Glob,WebSearch,WebFetch"
 ```
 
-Do not enable edit/write tools for this skill. Enable `Bash` only when the user explicitly wants Claude to run verification commands; Codex still owns validation and final edits.
+Do not enable edit/write tools for these skills. Enable `Bash` only when the user explicitly wants Claude to run verification commands; Codex still owns validation and final edits.
 
 ## Safety Model
 
@@ -150,6 +188,16 @@ Use `--allow-untracked` only for new non-secret files that you have inspected.
 
 ```text
 claude-peer-review/
+  SKILL.md
+  agents/openai.yaml
+  references/prompt-template.md
+  scripts/build_review_context.py
+gpt-peer-review/
+  SKILL.md
+  agents/openai.yaml
+  references/prompt-template.md
+  scripts/build_review_context.py
+claude-gpt-peer-review/
   SKILL.md
   agents/openai.yaml
   references/prompt-template.md

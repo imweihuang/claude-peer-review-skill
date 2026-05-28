@@ -1,0 +1,4 @@
+interface:
+  display_name: "GPT Peer Review"
+  short_description: "Run safe GPT peer reviews"
+  default_prompt: "Use $gpt-peer-review to run a candid GPT peer review of this repository."
