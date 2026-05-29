@@ -37,7 +37,7 @@ Default dual peer reviews to these settings when the installed CLIs and accounts
 
 | Reviewer | Model | Effort | Budget |
 | --- | --- | --- | --- |
-| Claude | `claude-opus-4-7` | `xhigh` | `3` USD default cap |
+| Claude | `claude-opus-4-8` | `xhigh` | `3` USD default cap |
 | GPT | `gpt-5.5` | `xhigh` | Codex CLI account default |
 
 Use per-request environment overrides when needed:
@@ -48,7 +48,7 @@ Use per-request environment overrides when needed:
 - `CLAUDE_GPT_REVIEW_GPT_MODEL` for GPT model ID or alias
 - `CLAUDE_GPT_REVIEW_GPT_EFFORT` for `low`, `medium`, `high`, or `xhigh`
 
-Do not silently downgrade either reviewer. If Claude Opus 4.7, GPT-5.5, or xHigh effort is unavailable, report the limitation and ask before using a fallback.
+Do not silently downgrade either reviewer. If Claude Opus 4.8, GPT-5.5, or xHigh effort is unavailable, report the limitation and ask before using a fallback.
 
 ## Workflow
 
@@ -97,7 +97,7 @@ claude_out="$tmp_dir/claude-review.md"
 gpt_out="$tmp_dir/gpt-review.md"
 gpt_cwd="$tmp_dir/gpt-cwd"
 mkdir "$gpt_cwd"
-claude_model="${CLAUDE_GPT_REVIEW_CLAUDE_MODEL:-claude-opus-4-7}"
+claude_model="${CLAUDE_GPT_REVIEW_CLAUDE_MODEL:-claude-opus-4-8}"
 claude_effort="${CLAUDE_GPT_REVIEW_CLAUDE_EFFORT:-xhigh}"
 claude_budget="${CLAUDE_GPT_REVIEW_CLAUDE_MAX_BUDGET_USD:-3}"
 gpt_model="${CLAUDE_GPT_REVIEW_GPT_MODEL:-gpt-5.5}"
@@ -172,7 +172,7 @@ Keep the bundle small enough for both reviewers to reason over. A sharper 10-fil
 - Do not let either reviewer edit files.
 - Prefer `--tools ""` and `--no-session-persistence` for Claude.
 - Prefer a temporary empty `--cd` directory, `--sandbox read-only`, and `--ephemeral` for GPT.
-- Prefer the default `claude-opus-4-7 --effort xhigh` and `gpt-5.5` with `model_reasoning_effort="xhigh"` settings.
+- Prefer the default `claude-opus-4-8 --effort xhigh` and `gpt-5.5` with `model_reasoning_effort="xhigh"` settings.
 - Do not use `gpt-5.55` unless the local Codex model catalog explicitly exposes that exact model ID.
 - Do not use `--allow-untracked` until you personally inspect the untracked files.
 - Remember that tracked does not mean secret-free; inspect the `--list` output and be cautious with config files.

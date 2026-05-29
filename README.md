@@ -117,7 +117,7 @@ Default reviewer models:
 | --- | --- |
 | `claude-peer-review` | `claude-opus-4-8`, xHigh effort, tools disabled, no session persistence, 3 USD default cap |
 | `gpt-peer-review` | `gpt-5.5`, xHigh effort, temporary empty working directory, read-only sandbox |
-| `claude-gpt-peer-review` | Claude `claude-opus-4-7` xHigh and GPT `gpt-5.5` xHigh |
+| `claude-gpt-peer-review` | Claude `claude-opus-4-8` xHigh and GPT `gpt-5.5` xHigh |
 
 Override a Claude-only request with:
 
