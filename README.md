@@ -182,6 +182,16 @@ Generate a context bundle:
 python3 claude-peer-review/scripts/build_review_context.py README.md docs src tests
 ```
 
+The helper defaults to a 1 MB total bundle and 100 KB per file. If a targeted review still needs more context, raise the limits for that run:
+
+```bash
+PEER_REVIEW_MAX_TOTAL_BYTES=1500000 \
+PEER_REVIEW_MAX_BYTES_PER_FILE=150000 \
+python3 gpt-peer-review/scripts/build_review_context.py README.md docs src tests
+```
+
+If the helper still reports `total byte limit reached`, split the review by subsystem instead of sending one giant prompt.
+
 Use `--allow-untracked` only for new non-secret files that you have inspected.
 
 ## Repository Structure

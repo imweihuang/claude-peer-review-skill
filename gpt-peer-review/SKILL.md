@@ -66,6 +66,7 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/gpt-peer-review/scripts/build_review
 python3 "${CODEX_HOME:-$HOME/.codex}/skills/gpt-peer-review/scripts/build_review_context.py" README.md docs backend/src backend/tests
 ```
 
+   - If the helper reports `total byte limit reached`, first narrow the selected paths. For a targeted cross-file review, raise the limit explicitly with `--max-total-bytes 1500000`, `--max-bytes-per-file 150000`, or the one-run environment overrides `PEER_REVIEW_MAX_TOTAL_BYTES` and `PEER_REVIEW_MAX_BYTES_PER_FILE`.
    - Add `--allow-untracked` only for newly created non-secret docs/code that you have inspected.
 
 3. Prepare the external-review prompt.

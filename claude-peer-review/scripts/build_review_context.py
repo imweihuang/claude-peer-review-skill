@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -72,7 +73,26 @@ BLOCKED_SUFFIXES = {
 }
 
 
+def positive_int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    normalized = raw.strip().replace("_", "")
+    try:
+        value = int(normalized)
+    except ValueError:
+        print(f"[context-builder] invalid {name}={raw!r}; using default {default}", file=sys.stderr)
+        return default
+    if value <= 0:
+        print(f"[context-builder] invalid {name}={raw!r}; using default {default}", file=sys.stderr)
+        return default
+    return value
+
+
 def main() -> int:
+    default_max_bytes_per_file = positive_int_env("PEER_REVIEW_MAX_BYTES_PER_FILE", 100_000)
+    default_max_total_bytes = positive_int_env("PEER_REVIEW_MAX_TOTAL_BYTES", 1_000_000)
+
     parser = argparse.ArgumentParser(
         description="Build a safe text context bundle for external peer review.",
     )
@@ -80,8 +100,8 @@ def main() -> int:
     parser.add_argument("--root", default=".", help="Repository root. Defaults to current directory.")
     parser.add_argument("--allow-untracked", action="store_true", help="Allow explicitly selected untracked files.")
     parser.add_argument("--list", action="store_true", help="List selected files instead of printing file contents.")
-    parser.add_argument("--max-bytes-per-file", type=int, default=50_000)
-    parser.add_argument("--max-total-bytes", type=int, default=500_000)
+    parser.add_argument("--max-bytes-per-file", type=int, default=default_max_bytes_per_file)
+    parser.add_argument("--max-total-bytes", type=int, default=default_max_total_bytes)
     args = parser.parse_args()
 
     root = Path(args.root).resolve()
@@ -102,7 +122,12 @@ def main() -> int:
     written = 0
     for path in candidates:
         if written >= args.max_total_bytes:
-            print(f"[context-builder] total byte limit reached at {args.max_total_bytes}", file=sys.stderr)
+            print(
+                "[context-builder] total byte limit reached at "
+                f"{args.max_total_bytes}; narrow the selected paths or raise "
+                "--max-total-bytes / PEER_REVIEW_MAX_TOTAL_BYTES for a targeted review",
+                file=sys.stderr,
+            )
             break
         if is_blocked(path, root):
             print(f"[context-builder] skipped blocked path: {display_path(path, root)}", file=sys.stderr)
