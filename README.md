@@ -1,161 +1,119 @@
 # Peer Review Skills
 
-This repository contains Codex skills for running safe external peer reviews of software projects:
+This repository contains Codex skills for safe external software peer review.
 
-- `claude-peer-review`: run Claude CLI as a peer reviewer.
-- `gpt-peer-review`: run Codex CLI with GPT-5.5 as a peer reviewer.
-- `claude-gpt-peer-review`: run independent Claude and GPT reviews, then have Codex reconcile and validate the findings.
+Primary skill:
 
-They are useful for:
+- `peer-review`: run independent Claude, Codex/GPT, Gemini, and Grok Build CLI peer reviews, then have Codex reconcile and validate the findings.
 
-- code audits
-- architecture reviews
-- data/schema reviews
-- production-readiness reviews
-- API contract reviews
-- product strategy and methodology reviews
-- "give me honest feedback" second-opinion reviews
+Compatibility entry points:
+
+- `claude-peer-review`: Claude-only preset for the unified runner.
+- `gpt-peer-review`: Codex/GPT-only preset for the unified runner.
+- `claude-gpt-peer-review`: Claude plus Codex/GPT preset for the unified runner.
 
 The core pattern is:
 
 ```text
 curate safe repo context
-  -> ask Claude for candid, ranked feedback
+  -> run independent CLI reviewers
+  -> report exact participants, models, and efforts
   -> have Codex validate each finding
   -> accept, defer, reject, or implement deliberately
 ```
 
-## Collaboration Model
+External reviewers propose candidates and critiques. Codex verifies them against the repository, applies changes when appropriate, and explains what was accepted, deferred, or rejected. The user keeps product judgment and final direction.
 
-This skill is built around a three-role workflow:
+## Defaults
 
-```text
-Codex = implementer + repo operator
-External model = outside reviewer + strategist + red-team peer
-User = product owner + final decision-maker
-```
+| Reviewer | CLI | Default model | Default effort |
+| --- | --- | --- | --- |
+| Claude | `claude` | `claude-opus-4-8` | `max` |
+| Codex/GPT | `codex` | `gpt-5.5` | `xhigh` |
+| Gemini | `gemini` | `gemini-3.1-pro` | reported as `not-cli-exposed` unless the local CLI exposes a thinking flag |
+| Grok Build | `grok` | `grok-build` | `max`; `reasoning_effort=high` |
 
-The external reviewers propose candidates and critiques. Codex verifies them against the repository, applies changes when appropriate, and explains what was accepted, deferred, or rejected. The user keeps product judgment and final direction.
-
-## Why This Skill Exists
-
-Using another model as a peer reviewer can be valuable, but only if the workflow is controlled. These skills help Codex:
-
-- avoid sending `.env`, keys, logs, local databases, caches, and build artifacts
-- keep Claude's filesystem tools disabled by default
-- keep GPT reviews in a temporary empty working directory by default
-- ask for file-grounded findings
-- separate must-fix items from strategic improvements
-- validate external suggestions before changing code
-
-External models are treated as advisors, not authorities.
+The runner does not silently downgrade. If a CLI, model, auth state, or effort setting is unavailable, the report says so clearly.
 
 ## Install
 
-In Codex, ask:
+In Codex, install the primary skill:
+
+```text
+Install the Codex skill from https://github.com/imweihuang/claude-peer-review-skill/tree/main/peer-review
+```
+
+Optional compatibility installs:
 
 ```text
 Install the Codex skill from https://github.com/imweihuang/claude-peer-review-skill/tree/main/claude-peer-review
-```
-
-Or install the GPT and dual-review skills:
-
-```text
 Install the Codex skill from https://github.com/imweihuang/claude-peer-review-skill/tree/main/gpt-peer-review
 Install the Codex skill from https://github.com/imweihuang/claude-peer-review-skill/tree/main/claude-gpt-peer-review
 ```
-
-Then restart Codex so the new skill is discovered.
 
 Manual install:
 
 ```bash
 mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
+cp -R peer-review "${CODEX_HOME:-$HOME/.codex}/skills/"
 cp -R claude-peer-review "${CODEX_HOME:-$HOME/.codex}/skills/"
 cp -R gpt-peer-review "${CODEX_HOME:-$HOME/.codex}/skills/"
 cp -R claude-gpt-peer-review "${CODEX_HOME:-$HOME/.codex}/skills/"
 ```
 
-## Usage Examples
+Restart Codex so the new skill metadata is discovered.
+
+## Usage
+
+Default all-reviewer council:
+
+```text
+Use $peer-review to run a production-readiness review of this repository.
+```
+
+Specific presets:
 
 ```text
 Use $claude-peer-review to run Claude as a code-audit peer on this repo.
-```
-
-```text
 Use $gpt-peer-review to run GPT-5.5 as a code-audit peer on this repo.
-```
-
-```text
 Use $claude-gpt-peer-review to ask both Claude and GPT for independent production-readiness reviews.
 ```
 
-```text
-Use $claude-peer-review to ask Claude for an honest schema and architecture review.
+Preflight local CLIs and requested settings:
+
+```bash
+python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.py" --preflight
 ```
 
-```text
-Use $claude-peer-review to review production readiness before launch.
+Run a targeted review:
+
+```bash
+python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.py" \
+  --mode "Diff Critique" \
+  --milestone "current milestone" \
+  --focus "correctness bugs and behavioral regressions" \
+  --focus "missing tests and security boundaries" \
+  README.md src tests
 ```
 
-```text
-Use $claude-peer-review to evaluate this PR-like diff for correctness bugs and missing tests.
+Run a subset:
+
+```bash
+python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.py" \
+  --reviewers claude,gpt \
+  README.md src tests
 ```
 
 ## Requirements
 
 - Codex with skills enabled
-- Claude CLI installed and authenticated for live Claude reviews
-- Codex CLI installed and authenticated for live GPT reviews
+- `claude` CLI installed and authenticated for Claude reviews
+- `codex` CLI installed and authenticated for GPT reviews
+- `gemini` CLI installed and authenticated for Gemini reviews
+- `grok` CLI installed and authenticated for Grok Build reviews
 - Git installed for tracked-file context selection
 
-If a required CLI is unavailable, the skills instruct Codex to say so rather than pretending an internal self-review is an external review.
-
-Default reviewer models:
-
-| Skill | Reviewer Defaults |
-| --- | --- |
-| `claude-peer-review` | `claude-opus-4-8`, max effort, tools disabled, no session persistence, 3 USD default cap |
-| `gpt-peer-review` | `gpt-5.5`, xHigh effort, temporary empty working directory, read-only sandbox |
-| `claude-gpt-peer-review` | Claude `claude-opus-4-8` max and GPT `gpt-5.5` xHigh |
-
-Override a Claude-only request with:
-
-```bash
-CLAUDE_PEER_REVIEW_MODEL=claude-opus-4-8 \
-CLAUDE_PEER_REVIEW_EFFORT=max \
-CLAUDE_PEER_REVIEW_MAX_BUDGET_USD=3
-```
-
-Override a GPT-only request with:
-
-```bash
-GPT_PEER_REVIEW_MODEL=gpt-5.5 \
-GPT_PEER_REVIEW_EFFORT=xhigh
-```
-
-## Optional Tools
-
-The safest default is no Claude tools:
-
-```bash
-CLAUDE_PEER_REVIEW_TOOLS=""
-```
-
-Enable tools only for the current review when the user explicitly approves the need:
-
-```bash
-# Current external facts: competitors, latest docs, CVEs, pricing, vendor changes.
-CLAUDE_PEER_REVIEW_TOOLS="WebSearch,WebFetch"
-
-# Large read-only repo review when curated context is not enough.
-CLAUDE_PEER_REVIEW_TOOLS="Read,Grep,Glob"
-
-# Mixed current-info plus read-only repo exploration.
-CLAUDE_PEER_REVIEW_TOOLS="Read,Grep,Glob,WebSearch,WebFetch"
-```
-
-Do not enable edit/write tools for these skills. Enable `Bash` only when the user explicitly wants Claude to run verification commands; Codex still owns validation and final edits.
+If a required CLI is unavailable or unauthenticated, the skill reports that status rather than pretending an internal self-review is an external review.
 
 ## Safety Model
 
@@ -170,24 +128,24 @@ The bundled context helper only includes selected files and skips common unsafe 
 - binary media/archive files
 - paths outside the repo root
 
-You can inspect selected context before running Claude:
+Inspect selected context before running reviewers:
 
 ```bash
-python3 claude-peer-review/scripts/build_review_context.py --list README.md docs src tests
+python3 peer-review/scripts/build_review_context.py --list README.md docs src tests
 ```
 
 Generate a context bundle:
 
 ```bash
-python3 claude-peer-review/scripts/build_review_context.py README.md docs src tests
+python3 peer-review/scripts/build_review_context.py README.md docs src tests
 ```
 
-The helper defaults to a 1 MB total bundle and 100 KB per file. If a targeted review still needs more context, raise the limits for that run:
+The helper defaults to a 1 MB total bundle and 100 KB per file. If a targeted review needs more context, raise the limits for that run:
 
 ```bash
 PEER_REVIEW_MAX_TOTAL_BYTES=1500000 \
 PEER_REVIEW_MAX_BYTES_PER_FILE=150000 \
-python3 gpt-peer-review/scripts/build_review_context.py README.md docs src tests
+python3 peer-review/scripts/build_review_context.py README.md docs src tests
 ```
 
 If the helper still reports `total byte limit reached`, split the review by subsystem instead of sending one giant prompt.
@@ -197,21 +155,21 @@ Use `--allow-untracked` only for new non-secret files that you have inspected.
 ## Repository Structure
 
 ```text
+peer-review/
+  SKILL.md
+  agents/openai.yaml
+  references/prompt-template.md
+  scripts/build_review_context.py
+  scripts/run_peer_review.py
 claude-peer-review/
   SKILL.md
   agents/openai.yaml
-  references/prompt-template.md
-  scripts/build_review_context.py
 gpt-peer-review/
   SKILL.md
   agents/openai.yaml
-  references/prompt-template.md
-  scripts/build_review_context.py
 claude-gpt-peer-review/
   SKILL.md
   agents/openai.yaml
-  references/prompt-template.md
-  scripts/build_review_context.py
 ```
 
 ## License

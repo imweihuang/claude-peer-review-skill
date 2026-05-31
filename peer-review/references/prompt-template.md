@@ -1,6 +1,6 @@
-# Claude Peer Review Prompt Template
+# Peer Review Prompt Template
 
-Use this template when asking Claude to review a repo as a strategist, code auditor, architecture reviewer, data/schema reviewer, launch-readiness reviewer, or product peer.
+Use this template when adapting a multi-model peer review prompt. Send the same prompt and context to every external reviewer before reading any model's answer.
 
 ```text
 You are acting as a candid strategist and senior peer reviewer for <PROJECT>.
@@ -21,6 +21,7 @@ Review the selected repository context below, especially:
 3. <focus area>
 
 Constraints:
+- Use only the supplied context unless explicitly told otherwise.
 - Do not inspect or request .env, secrets, credentials, private keys, runtime logs, untracked files, or unrelated user files.
 - Do not edit files.
 - Ground findings in the provided code/docs.
@@ -40,40 +41,18 @@ Output format:
 7. Any product/schema/architecture insight that changes your view of the project
 ```
 
-## Common Focus Areas
-
-Data/schema review:
+After all reviews complete, Codex synthesizes and validates. Keep raw model outputs separate until this step.
 
 ```text
-data schema, raw-to-structured pipeline, future source generality, event/object semantics, auditability, versioning, migration strategy, tests
-```
+Group findings by:
+1. Agreement across reviewers
+2. Model-specific finding
+3. Direct conflict
+4. Speculative or unverifiable
 
-Market intelligence or AI extraction review:
-
-```text
-source normalization, extraction schema, prompt/output contract, quote/repost/reply/media handling, mindshare versus predictions, confidence/review workflow, quantification/scoring
-```
-
-Production readiness review:
-
-```text
-configuration, secrets handling, deployment path, migrations, health checks, observability, data recovery, auth boundaries, operational runbooks, tests
-```
-
-Architecture review:
-
-```text
-module boundaries, provider abstractions, data flow, extensibility, failure modes, coupling, test strategy, complexity budget
-```
-
-Diff critique:
-
-```text
-behavioral regressions, edge cases, security/auth boundaries, missing tests, migration risk, changed public contracts, generated-file noise
-```
-
-Deciding vote:
-
-```text
-compare option A versus option B against current constraints, operational risk, future extensibility, implementation cost, and reversibility
+For each important finding, decide:
+- accept and fix
+- accept and document/defer
+- reject with reason
+- needs user decision
 ```
