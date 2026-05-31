@@ -85,6 +85,20 @@ Preflight local CLIs and requested settings:
 python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.py" --preflight
 ```
 
+Manually check/update reviewer CLIs and model-default evidence:
+
+```bash
+python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/refresh_peer_review_clis.py"
+```
+
+Update CLIs explicitly:
+
+```bash
+python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/refresh_peer_review_clis.py" --update
+```
+
+The refresh command reports installed versions, package-manager latest versions, local model catalogs, and proposed default changes. It does not rewrite skill defaults automatically.
+
 Run a targeted review:
 
 ```bash
@@ -160,6 +174,7 @@ peer-review/
   agents/openai.yaml
   references/prompt-template.md
   scripts/build_review_context.py
+  scripts/refresh_peer_review_clis.py
   scripts/run_peer_review.py
 claude-peer-review/
   SKILL.md

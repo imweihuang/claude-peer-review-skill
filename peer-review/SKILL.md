@@ -64,7 +64,19 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.
    - Grok may be installed but unauthenticated. Report that as unavailable for the run until `grok login` or supported xAI auth is configured.
    - Gemini CLI currently exposes `--model` but no clear thinking-effort flag in `gemini --help`; report Gemini effort as `not-cli-exposed` unless the installed CLI proves otherwise.
 
-4. Run independent reviewers with one neutral prompt and one shared context bundle.
+4. Refresh reviewer CLIs and default-model evidence only when explicitly asked.
+
+```bash
+python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/refresh_peer_review_clis.py"
+```
+
+   - This is a manual maintenance command, not part of normal peer-review execution.
+   - It checks installed CLI versions, package-manager latest versions where possible, local model catalogs, and current default effort evidence.
+   - It prints proposed default changes but does not rewrite `SKILL.md` or `run_peer_review.py`.
+   - Run `--update` only when the user explicitly asks to update CLIs. Add `--install-missing` only when the user explicitly asks to install missing supported CLIs.
+   - Use `--no-online` when package registry/Homebrew checks are not wanted.
+
+5. Run independent reviewers with one neutral prompt and one shared context bundle.
 
 ```bash
 python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.py" \
@@ -81,7 +93,7 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.
    - Gemini runs in plan approval mode and a sandbox where supported.
    - Grok Build runs with subagents disabled, web search disabled, plan permission mode, and no tool allowlist.
 
-5. Synthesize without outsourcing judgment.
+6. Synthesize without outsourcing judgment.
    - Group findings into:
      - agreement across reviewers
      - Claude-only
@@ -93,12 +105,12 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.
    - Validate major findings against the repo before acting.
    - Classify each important finding as `accept and fix`, `accept and defer`, `reject with reason`, or `needs user decision`.
 
-6. Implement only the right scope.
+7. Implement only the right scope.
    - If the user asked for review only, do not modify files unless the newest request permits it.
    - If the user asked to proceed, apply small, high-confidence fixes and document strategic deferrals.
    - Keep unrelated refactors out.
 
-7. Report the outcome.
+8. Report the outcome.
    - Include selected review mode, context selection, and the participant table from the runner.
    - Include what each model actually participated with: CLI version, model, effort, and effort-status caveat.
    - Include strongest agreement, strongest disagreement, accepted/deferred/rejected findings, edits made, and verification results.
