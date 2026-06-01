@@ -30,7 +30,7 @@ External reviewers propose candidates and critiques. Codex verifies them against
 | --- | --- | --- | --- |
 | Claude | `claude` | `claude-opus-4-8` | `max` |
 | Codex/GPT | `codex` | `gpt-5.5` | `xhigh` |
-| Gemini | `gemini` | `gemini-3.1-pro` | reported as `not-cli-exposed` unless the local CLI exposes a thinking flag |
+| Gemini | `gemini` | `cli-default` | reported as `not-cli-exposed` unless the local CLI exposes a thinking flag |
 | Grok Build | `grok` | `grok-build` | `max`; `reasoning_effort=high` |
 
 The runner does not silently downgrade. If a CLI, model, auth state, or effort setting is unavailable, the report says so clearly.
@@ -118,6 +118,8 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.
   README.md src tests
 ```
 
+By default a run exits nonzero if any requested reviewer fails. Add `--allow-partial` only when a degraded council is acceptable.
+
 ## Requirements
 
 - Codex with skills enabled
@@ -142,6 +144,8 @@ The bundled context helper only includes selected files and skips common unsafe 
 - binary media/archive files
 - paths outside the repo root
 
+It also fails closed outside git by default, rejects common secret/token content patterns, blocks symlink targets outside the root, and emits an in-band `CONTEXT OMITTED` marker when the total byte limit drops files.
+
 Inspect selected context before running reviewers:
 
 ```bash
@@ -165,6 +169,7 @@ python3 peer-review/scripts/build_review_context.py README.md docs src tests
 If the helper still reports `total byte limit reached`, split the review by subsystem instead of sending one giant prompt.
 
 Use `--allow-untracked` only for new non-secret files that you have inspected.
+Use `--allow-non-git-context` and `--allow-secret-like-content` only after manual inspection.
 
 ## Repository Structure
 
@@ -176,6 +181,8 @@ peer-review/
   scripts/build_review_context.py
   scripts/refresh_peer_review_clis.py
   scripts/run_peer_review.py
+tests/
+  test_peer_review_scripts.py
 claude-peer-review/
   SKILL.md
   agents/openai.yaml

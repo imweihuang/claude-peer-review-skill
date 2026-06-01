@@ -15,7 +15,7 @@ Default reviewer roster:
 | --- | --- | --- | --- |
 | Claude | `claude` | `claude-opus-4-8` | `max` |
 | Codex/GPT | `codex` | `gpt-5.5` | `xhigh` |
-| Gemini | `gemini` | `gemini-3.1-pro` | reported as `not-cli-exposed` unless the local CLI exposes a thinking flag |
+| Gemini | `gemini` | `cli-default` | reported as `not-cli-exposed` unless the local CLI exposes a thinking flag |
 | Grok Build | `grok` | `grok-build` | `max`; `reasoning_effort=high` |
 
 If a CLI, model, auth state, or effort setting is unavailable, report it clearly. Do not silently downgrade or present Codex self-review as external peer review.
@@ -53,6 +53,9 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/build_review_con
 
    - If the helper reports `total byte limit reached`, first narrow the selected paths. For a targeted cross-file review, raise limits with `--max-total-bytes 1500000`, `--max-bytes-per-file 150000`, or `PEER_REVIEW_MAX_TOTAL_BYTES` / `PEER_REVIEW_MAX_BYTES_PER_FILE`.
    - Add `--allow-untracked` only for newly created non-secret docs/code that you have inspected.
+   - The context helper fails closed outside git by default. Use `--allow-non-git-context` only after inspecting the selected paths.
+   - The context helper aborts on common secret/token content patterns. Redact the value or use `--allow-secret-like-content` only after manual inspection.
+   - If files are omitted by total byte limits, the helper now emits an in-band `CONTEXT OMITTED` marker that reviewers can see.
 
 3. Preflight the local reviewer roster.
 
@@ -62,7 +65,8 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.
 
    - The response must include all requested participants, CLI versions, requested models, requested efforts, effort-status caveats, and unavailable/auth-failed reviewers.
    - Grok may be installed but unauthenticated. Report that as unavailable for the run until `grok login` or supported xAI auth is configured.
-   - Gemini CLI currently exposes `--model` but no clear thinking-effort flag in `gemini --help`; report Gemini effort as `not-cli-exposed` unless the installed CLI proves otherwise.
+   - Gemini CLI currently exposes `--model` but no clear thinking-effort flag in `gemini --help`; by default use the local CLI default model and report Gemini effort as `not-cli-exposed` unless the installed CLI proves otherwise.
+   - Preflight proves local CLI/model metadata, not a full paid review. A run may still fail on provider-specific runtime requirements; report those failures plainly.
 
 4. Refresh reviewer CLIs and default-model evidence only when explicitly asked.
 
@@ -90,8 +94,9 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.
    - The runner keeps outputs separate and does not show one model's answer to another.
    - Claude runs with tools disabled and no session persistence.
    - Codex/GPT runs in a temporary empty cwd with read-only sandboxing and ephemeral mode.
-   - Gemini runs in plan approval mode and a sandbox where supported.
-   - Grok Build runs with subagents disabled, web search disabled, plan permission mode, and no tool allowlist.
+   - Gemini runs with `--skip-trust`, plan approval mode, and a sandbox where supported.
+   - Grok Build runs with subagents disabled, web search disabled, plan permission mode, no tool allowlist, an initialized empty temp git directory, and `PEER_REVIEW_GROK_MAX_TURNS` defaulting to `4`.
+   - By default the run exits nonzero if any requested reviewer fails. Use `--allow-partial` only when a degraded council is acceptable.
 
 6. Synthesize without outsourcing judgment.
    - Group findings into:
@@ -127,10 +132,11 @@ PEER_REVIEW_CLAUDE_EFFORT=max
 PEER_REVIEW_CLAUDE_MAX_BUDGET_USD=3
 PEER_REVIEW_CODEX_MODEL=gpt-5.5
 PEER_REVIEW_CODEX_EFFORT=xhigh
-PEER_REVIEW_GEMINI_MODEL=gemini-3.1-pro
+PEER_REVIEW_GEMINI_MODEL=cli-default
 PEER_REVIEW_GROK_MODEL=grok-build
 PEER_REVIEW_GROK_EFFORT=max
 PEER_REVIEW_GROK_REASONING_EFFORT=high
+PEER_REVIEW_GROK_MAX_TURNS=4
 ```
 
 Do not use a lower model or lower effort unless the user explicitly approves the fallback.

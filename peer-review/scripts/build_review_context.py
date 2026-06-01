@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -72,6 +73,19 @@ BLOCKED_SUFFIXES = {
     ".tfstate",
 }
 
+SECRET_PATTERNS = [
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b"),
+    re.compile(r"\bghp_[0-9A-Za-z]{30,}\b"),
+    re.compile(r"\bgithub_pat_[0-9A-Za-z_]{60,}\b"),
+    re.compile(r"\bsk-(?:proj-|ant-)?[0-9A-Za-z_-]{32,}\b"),
+    re.compile(
+        r"(?i)\b(?:api[_-]?key|client[_-]?secret|access[_-]?token|auth[_-]?token|password)\b"
+        r"\s*[:=]\s*['\"]?[0-9A-Za-z_./+=-]{24,}"
+    ),
+]
+
 
 def positive_int_env(name: str, default: int) -> int:
     raw = os.environ.get(name)
@@ -99,6 +113,16 @@ def main() -> int:
     parser.add_argument("paths", nargs="+", help="Files or directories to include.")
     parser.add_argument("--root", default=".", help="Repository root. Defaults to current directory.")
     parser.add_argument("--allow-untracked", action="store_true", help="Allow explicitly selected untracked files.")
+    parser.add_argument(
+        "--allow-non-git-context",
+        action="store_true",
+        help="Allow context building outside a git repository. Use only after inspecting selected paths.",
+    )
+    parser.add_argument(
+        "--allow-secret-like-content",
+        action="store_true",
+        help="Allow files whose contents match common secret/token patterns.",
+    )
     parser.add_argument("--list", action="store_true", help="List selected files instead of printing file contents.")
     parser.add_argument("--max-bytes-per-file", type=int, default=default_max_bytes_per_file)
     parser.add_argument("--max-total-bytes", type=int, default=default_max_total_bytes)
@@ -108,9 +132,12 @@ def main() -> int:
     tracked = git_tracked_files(root)
     if tracked is None:
         print(
-            "[context-builder] WARNING: git ls-files unavailable; include only paths you have inspected.",
+            "[context-builder] ERROR: git ls-files unavailable; refusing non-git context by default. "
+            "Pass --allow-non-git-context only after inspecting selected paths.",
             file=sys.stderr,
         )
+        if not args.allow_non_git_context:
+            return 2
     candidates = collect_candidates(root, args.paths, tracked, args.allow_untracked)
 
     if args.list:
@@ -120,8 +147,18 @@ def main() -> int:
         return 0
 
     written = 0
-    for path in candidates:
+    for index, path in enumerate(candidates):
         if written >= args.max_total_bytes:
+            omitted = [display_path(item, root) for item in candidates[index:] if not is_blocked(item, root)]
+            sys.stdout.write(
+                "\n===== CONTEXT OMITTED =====\n"
+                f"Total byte limit reached at {args.max_total_bytes}; "
+                f"{len(omitted)} candidate file(s) were not included.\n"
+            )
+            for rel in omitted[:20]:
+                sys.stdout.write(f"- {rel}\n")
+            if len(omitted) > 20:
+                sys.stdout.write(f"- ... {len(omitted) - 20} more\n")
             print(
                 "[context-builder] total byte limit reached at "
                 f"{args.max_total_bytes}; narrow the selected paths or raise "
@@ -140,6 +177,15 @@ def main() -> int:
         if b"\x00" in data:
             print(f"[context-builder] skipped binary path: {display_path(path, root)}", file=sys.stderr)
             continue
+        secret_match = find_secret_like_content(data)
+        if secret_match and not args.allow_secret_like_content:
+            print(
+                "[context-builder] ERROR: possible secret-like content in "
+                f"{display_path(path, root)} ({secret_match}); refusing to build context. "
+                "Remove/redact the value or pass --allow-secret-like-content after inspection.",
+                file=sys.stderr,
+            )
+            return 3
 
         truncated = len(data) > args.max_bytes_per_file
         if truncated:
@@ -213,7 +259,10 @@ def expand_path(root: Path, path: Path, tracked: set[Path] | None) -> list[Path]
 
 
 def is_blocked(path: Path, root: Path) -> bool:
-    rel_parts = path.resolve().relative_to(root).parts
+    try:
+        rel_parts = path.resolve().relative_to(root).parts
+    except ValueError:
+        return True
     name = path.name
     lower_name = name.lower()
     return (
@@ -222,6 +271,14 @@ def is_blocked(path: Path, root: Path) -> bool:
         or lower_name.startswith(".env.")
         or path.suffix.lower() in BLOCKED_SUFFIXES
     )
+
+
+def find_secret_like_content(data: bytes) -> str | None:
+    text = data.decode("utf-8", errors="ignore")
+    for pattern in SECRET_PATTERNS:
+        if pattern.search(text):
+            return pattern.pattern[:80]
+    return None
 
 
 def display_path(path: Path, root: Path) -> str:

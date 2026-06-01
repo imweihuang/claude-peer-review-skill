@@ -1,0 +1,167 @@
+from __future__ import annotations
+
+import importlib.util
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+CONTEXT_SCRIPT = REPO_ROOT / "peer-review" / "scripts" / "build_review_context.py"
+RUNNER_SCRIPT = REPO_ROOT / "peer-review" / "scripts" / "run_peer_review.py"
+
+
+def load_module(path: Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+class ContextBuilderTests(unittest.TestCase):
+    def run_context(self, root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["python3", str(CONTEXT_SCRIPT), "--root", str(root), *args],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+
+    def init_repo(self, root: Path, files: dict[str, str]) -> None:
+        subprocess.run(["git", "init"], cwd=root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=root, check=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
+        for rel, content in files.items():
+            path = root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=root, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+
+    def test_total_limit_omission_is_visible_in_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.init_repo(root, {"a.txt": "a" * 50, "b.txt": "b" * 50})
+
+            result = self.run_context(root, "--max-total-bytes", "20", "a.txt", "b.txt")
+
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("CONTEXT OMITTED", result.stdout)
+
+    def test_symlink_to_outside_root_is_blocked(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "repo"
+            outside = Path(tmp) / "outside-secret.txt"
+            root.mkdir()
+            outside.write_text("SECRET_TOKEN=abc123", encoding="utf-8")
+            (root / "safe-link.md").symlink_to(outside)
+            subprocess.run(["git", "init"], cwd=root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
+            subprocess.run(["git", "add", "safe-link.md"], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-m", "init"], cwd=root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+
+            result = self.run_context(root, "safe-link.md")
+
+            self.assertEqual(result.returncode, 0)
+            self.assertNotIn("SECRET_TOKEN", result.stdout)
+            self.assertIn("skipped", result.stderr)
+
+    def test_secret_like_content_blocks_context_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.init_repo(root, {"config.yaml": "api_key: sk-proj-" + "a" * 48})
+
+            result = self.run_context(root, "config.yaml")
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("possible secret", result.stderr)
+
+    def test_non_git_root_fails_closed_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "notes.md").write_text("hello", encoding="utf-8")
+
+            result = self.run_context(root, "notes.md")
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("git ls-files unavailable", result.stderr)
+
+
+class RunnerTests(unittest.TestCase):
+    def test_gemini_command_skips_trust_for_headless_run(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+        participant = runner.Participant(
+            key="gemini",
+            label="Gemini",
+            cli="gemini",
+            cli_path="/bin/gemini",
+            cli_version="test",
+            requested_model="gemini-test",
+            requested_effort="not-cli-exposed",
+            effort_status="test",
+            status="ready",
+        )
+
+        cmd, stdin_text = runner.command_for(participant, "prompt", Path("/tmp"))
+
+        self.assertIn("--skip-trust", cmd)
+        self.assertEqual(stdin_text, "prompt")
+
+    def test_gemini_cli_default_omits_unverified_model_flag(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+        participant = runner.Participant(
+            key="gemini",
+            label="Gemini",
+            cli="gemini",
+            cli_path="/bin/gemini",
+            cli_version="test",
+            requested_model="cli-default",
+            requested_effort="not-cli-exposed",
+            effort_status="test",
+            status="ready",
+        )
+
+        cmd, _ = runner.command_for(participant, "prompt", Path("/tmp"))
+
+        self.assertNotIn("--model", cmd)
+
+    def test_grok_command_allows_more_than_one_turn(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+        with tempfile.TemporaryDirectory() as tmp:
+            participant = runner.Participant(
+                key="grok",
+                label="Grok Build",
+                cli="grok",
+                cli_path="/bin/grok",
+                cli_version="test",
+                requested_model="grok-build",
+                requested_effort="max; reasoning_effort=high",
+                effort_status="test",
+                status="ready",
+            )
+
+            cmd, _ = runner.command_for(participant, "prompt", Path(tmp))
+
+        self.assertIn("--max-turns", cmd)
+        turns = int(cmd[cmd.index("--max-turns") + 1])
+        self.assertGreaterEqual(turns, 4)
+
+    def test_run_exit_code_requires_all_reviewers_unless_partial_allowed(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+        results = [
+            runner.Participant("claude", "Claude", "claude", "/bin/claude", "test", "m", "e", "s", "ran"),
+            runner.Participant("gemini", "Gemini", "gemini", "/bin/gemini", "test", "m", "e", "s", "error"),
+        ]
+
+        self.assertEqual(runner.run_exit_code(results, allow_partial=False), 1)
+        self.assertEqual(runner.run_exit_code(results, allow_partial=True), 0)
+
+
+if __name__ == "__main__":
+    unittest.main()

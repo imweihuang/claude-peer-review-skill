@@ -60,12 +60,23 @@ def main() -> int:
     parser.add_argument("--focus", action="append", default=[], help="Focus area. May be repeated.")
     parser.add_argument("--prompt-file", help="Optional extra instructions to place before the context bundle.")
     parser.add_argument("--allow-untracked", action="store_true", help="Allow explicitly selected untracked files.")
+    parser.add_argument(
+        "--allow-non-git-context",
+        action="store_true",
+        help="Allow context building outside a git repository after manual path inspection.",
+    )
+    parser.add_argument(
+        "--allow-secret-like-content",
+        action="store_true",
+        help="Allow selected files whose contents match common secret/token patterns after manual inspection.",
+    )
     parser.add_argument("--max-bytes-per-file", type=int, default=None)
     parser.add_argument("--max-total-bytes", type=int, default=None)
     parser.add_argument("--output-dir", help="Directory for manifest and raw reviewer outputs.")
     parser.add_argument("--timeout-seconds", type=int, default=int(os.environ.get("PEER_REVIEW_TIMEOUT_SECONDS", "1800")))
     parser.add_argument("--preflight", action="store_true", help="Check local CLIs and requested settings without running reviews.")
     parser.add_argument("--dry-run", action="store_true", help="Print local reviewer metadata without invoking reviewers.")
+    parser.add_argument("--allow-partial", action="store_true", help="Exit 0 when at least one requested reviewer ran.")
     args = parser.parse_args()
 
     root = Path(args.root).resolve()
@@ -107,7 +118,7 @@ def main() -> int:
     (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
     print_summary(results, output_dir=output_dir, dry_run=False)
-    return 0 if any(p.status == "ran" for p in results) else 1
+    return run_exit_code(results, args.allow_partial)
 
 
 def parse_reviewers(raw: str) -> list[str]:
@@ -153,9 +164,9 @@ def preflight_participant(key: str) -> Participant:
             key=key,
             label="Gemini",
             cli="gemini",
-            model=os.environ.get("PEER_REVIEW_GEMINI_MODEL", "gemini-3.1-pro"),
+            model=os.environ.get("PEER_REVIEW_GEMINI_MODEL", "cli-default"),
             effort=os.environ.get("PEER_REVIEW_GEMINI_EFFORT", "not-cli-exposed"),
-            effort_status="Gemini CLI exposes --model but no thinking-effort flag in --help",
+            effort_status="Gemini CLI default model; no thinking-effort flag in --help",
         )
     if key == "grok":
         effort = os.environ.get("PEER_REVIEW_GROK_EFFORT", "max")
@@ -311,6 +322,10 @@ def build_context(args: argparse.Namespace, root: Path) -> str:
     cmd = [sys.executable, str(helper), "--root", str(root)]
     if args.allow_untracked:
         cmd.append("--allow-untracked")
+    if args.allow_non_git_context:
+        cmd.append("--allow-non-git-context")
+    if args.allow_secret_like_content:
+        cmd.append("--allow-secret-like-content")
     if args.max_bytes_per_file is not None:
         cmd += ["--max-bytes-per-file", str(args.max_bytes_per_file)]
     if args.max_total_bytes is not None:
@@ -321,6 +336,8 @@ def build_context(args: argparse.Namespace, root: Path) -> str:
         print(result.stderr, file=sys.stderr, end="")
     if result.returncode != 0:
         raise SystemExit(f"context builder failed with exit code {result.returncode}")
+    if not result.stdout.strip():
+        raise SystemExit("context builder produced empty context; refusing to run external reviewers")
     return result.stdout
 
 
@@ -364,7 +381,10 @@ def run_participant(participant: Participant, review_input: str, output_dir: Pat
 
     combined = f"{stdout}\n{stderr}"
     if result.returncode != 0:
-        participant.status = "auth_required" if is_auth_prompt(combined) else "error"
+        if is_model_unavailable(combined):
+            participant.status = "model_unavailable"
+        else:
+            participant.status = "auth_required" if is_auth_prompt(combined) else "error"
         participant.notes = short_note(combined) or f"exit code {result.returncode}"
     elif not stdout.strip():
         participant.status = "empty_output"
@@ -417,19 +437,21 @@ def command_for(participant: Participant, review_input: str, cwd: Path) -> tuple
             review_input,
         )
     if participant.key == "gemini":
+        cmd = ["gemini"]
+        if participant.requested_model not in {"", "cli-default", "default"}:
+            cmd += ["--model", participant.requested_model]
+        cmd += [
+            "--skip-trust",
+            "--approval-mode",
+            "plan",
+            "--sandbox",
+            "--output-format",
+            "text",
+            "--prompt",
+            "Use the complete review instructions and repository context from stdin. Do not edit files.",
+        ]
         return (
-            [
-                "gemini",
-                "--model",
-                participant.requested_model,
-                "--approval-mode",
-                "plan",
-                "--sandbox",
-                "--output-format",
-                "text",
-                "--prompt",
-                "Use the complete review instructions and repository context from stdin. Do not edit files.",
-            ],
+            cmd,
             review_input,
         )
     if participant.key == "grok":
@@ -437,6 +459,8 @@ def command_for(participant: Participant, review_input: str, cwd: Path) -> tuple
         prompt_file.write_text(review_input, encoding="utf-8")
         effort = os.environ.get("PEER_REVIEW_GROK_EFFORT", "max")
         reasoning = os.environ.get("PEER_REVIEW_GROK_REASONING_EFFORT", "high")
+        max_turns = os.environ.get("PEER_REVIEW_GROK_MAX_TURNS", "4")
+        subprocess.run(["git", "init"], cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
         return (
             [
                 "grok",
@@ -447,7 +471,7 @@ def command_for(participant: Participant, review_input: str, cwd: Path) -> tuple
                 "--reasoning-effort",
                 reasoning,
                 "--max-turns",
-                "1",
+                max_turns,
                 "--no-subagents",
                 "--disable-web-search",
                 "--tools",
@@ -476,6 +500,11 @@ def is_auth_prompt(text: str) -> bool:
         "login",
     ]
     return any(needle in lowered for needle in needles)
+
+
+def is_model_unavailable(text: str) -> bool:
+    lowered = text.lower()
+    return "modelnotfound" in lowered or "requested entity was not found" in lowered
 
 
 def short_note(text: str) -> str | None:
@@ -523,6 +552,15 @@ def print_summary(participants: list[Participant], output_dir: Path | None, dry_
         print("\n## Commands")
         for item in commands:
             print(f"- {item.label}: `{item.command}`")
+
+
+def run_exit_code(participants: list[Participant], allow_partial: bool) -> int:
+    ran_count = sum(1 for item in participants if item.status == "ran")
+    if ran_count == len(participants) and participants:
+        return 0
+    if allow_partial and ran_count > 0:
+        return 0
+    return 1
 
 
 if __name__ == "__main__":

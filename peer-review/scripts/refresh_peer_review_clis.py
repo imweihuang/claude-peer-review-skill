@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 DEFAULTS = {
     "claude": {"model": "claude-opus-4-8", "effort": "max"},
     "codex": {"model": "gpt-5.5", "effort": "xhigh"},
-    "gemini": {"model": "gemini-3.1-pro", "effort": "not-cli-exposed"},
+    "gemini": {"model": "cli-default", "effort": "not-cli-exposed"},
     "grok": {"model": "grok-build", "effort": "max; reasoning_effort=high"},
 }
 
@@ -215,7 +215,7 @@ def gemini_model_report() -> ModelReport:
     effort_exposed = "thinking" in help_text.lower() or "effort" in help_text.lower()
     if model_ok and not effort_exposed:
         status = "confirmed_with_caveat"
-        evidence = "`gemini --help` exposes --model but no thinking-effort flag"
+        evidence = "`gemini --help` exposes --model but no thinking-effort flag; CLI default is used unless overridden"
     elif model_ok:
         status = "needs_manual_check"
         evidence = "`gemini --help` may expose effort-related text; inspect before claiming"
