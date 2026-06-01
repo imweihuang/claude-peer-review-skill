@@ -92,6 +92,7 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.
 ```
 
    - The runner keeps outputs separate and does not show one model's answer to another.
+   - The runner runs independent reviewers in parallel by default, up to `--jobs 4` or `PEER_REVIEW_JOBS`. Use `--jobs 1` for sequential debugging.
    - Claude runs with tools disabled and no session persistence.
    - Codex/GPT runs in a temporary empty cwd with read-only sandboxing and ephemeral mode.
    - Gemini runs with `--skip-trust`, plan approval mode, and a sandbox where supported.
@@ -137,6 +138,7 @@ PEER_REVIEW_GROK_MODEL=grok-build
 PEER_REVIEW_GROK_EFFORT=max
 PEER_REVIEW_GROK_REASONING_EFFORT=high
 PEER_REVIEW_GROK_MAX_TURNS=4
+PEER_REVIEW_JOBS=4
 ```
 
 Do not use a lower model or lower effort unless the user explicitly approves the fallback.

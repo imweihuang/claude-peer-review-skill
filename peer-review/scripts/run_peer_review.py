@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import os
 import shlex
@@ -10,6 +11,8 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -41,6 +44,12 @@ class Participant:
     output_file: str | None = None
     stderr_file: str | None = None
     notes: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
+    duration_seconds: float | None = None
+
+
+ParticipantRunner = Callable[[Participant, str, Path, int], Participant]
 
 
 def main() -> int:
@@ -77,6 +86,12 @@ def main() -> int:
     parser.add_argument("--preflight", action="store_true", help="Check local CLIs and requested settings without running reviews.")
     parser.add_argument("--dry-run", action="store_true", help="Print local reviewer metadata without invoking reviewers.")
     parser.add_argument("--allow-partial", action="store_true", help="Exit 0 when at least one requested reviewer ran.")
+    parser.add_argument(
+        "--jobs",
+        type=positive_int,
+        default=positive_int_env("PEER_REVIEW_JOBS", 4),
+        help="Maximum reviewer CLIs to run at once. Defaults to PEER_REVIEW_JOBS or 4. Use --jobs 1 for sequential debugging.",
+    )
     args = parser.parse_args()
 
     root = Path(args.root).resolve()
@@ -97,12 +112,7 @@ def main() -> int:
     context = build_context(args, root)
     review_input = f"{prompt}\n\n# Selected Repository Context\n{context}"
 
-    results: list[Participant] = []
-    for participant in participants:
-        if participant.status != "ready":
-            results.append(participant)
-            continue
-        results.append(run_participant(participant, review_input, output_dir, args.timeout_seconds))
+    results = run_participants(participants, review_input, output_dir, args.timeout_seconds, jobs=args.jobs)
 
     manifest = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -111,6 +121,7 @@ def main() -> int:
         "project": args.project or root.name,
         "milestone": args.milestone,
         "reviewers_requested": reviewers,
+        "reviewer_jobs": args.jobs,
         "context_paths": args.paths,
         "context_bytes": len(context.encode("utf-8", errors="replace")),
         "participants": [asdict(item) for item in results],
@@ -134,6 +145,26 @@ def parse_reviewers(raw: str) -> list[str]:
             if reviewer not in selected:
                 selected.append(reviewer)
     return selected or list(DEFAULT_REVIEWERS)
+
+
+def positive_int(raw: str) -> int:
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected a positive integer, got {raw!r}") from exc
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"expected a positive integer, got {raw!r}")
+    return value
+
+
+def positive_int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return positive_int(raw)
+    except argparse.ArgumentTypeError as exc:
+        raise SystemExit(f"{name}: {exc}") from exc
 
 
 def preflight_participant(key: str) -> Participant:
@@ -341,7 +372,46 @@ def build_context(args: argparse.Namespace, root: Path) -> str:
     return result.stdout
 
 
+def run_participants(
+    participants: list[Participant],
+    review_input: str,
+    output_dir: Path,
+    timeout_seconds: int,
+    jobs: int,
+    runner: ParticipantRunner | None = None,
+) -> list[Participant]:
+    participant_runner = runner or run_participant
+    results = list(participants)
+    ready = [(index, participant) for index, participant in enumerate(participants) if participant.status == "ready"]
+    if not ready:
+        return results
+
+    if jobs == 1 or len(ready) == 1:
+        for index, participant in ready:
+            results[index] = participant_runner(participant, review_input, output_dir, timeout_seconds)
+        return results
+
+    max_workers = min(jobs, len(ready))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_index = {
+            executor.submit(participant_runner, participant, review_input, output_dir, timeout_seconds): index
+            for index, participant in ready
+        }
+        for future in concurrent.futures.as_completed(future_to_index):
+            index = future_to_index[future]
+            try:
+                results[index] = future.result()
+            except Exception as exc:  # pragma: no cover - defensive boundary around external runners.
+                participant = participants[index]
+                participant.status = "error"
+                participant.notes = f"unexpected runner failure: {exc}"
+                results[index] = participant
+    return results
+
+
 def run_participant(participant: Participant, review_input: str, output_dir: Path, timeout_seconds: int) -> Participant:
+    started_monotonic = time.monotonic()
+    participant.started_at = datetime.now(timezone.utc).isoformat()
     cwd = Path(tempfile.mkdtemp(prefix=f"peer-review-{participant.key}-"))
     out_file = output_dir / f"{participant.key}-review.md"
     err_file = output_dir / f"{participant.key}-stderr.txt"
@@ -366,11 +436,11 @@ def run_participant(participant: Participant, review_input: str, output_dir: Pat
         participant.notes = f"timed out after {timeout_seconds}s"
         out_file.write_text(exc.stdout or "", encoding="utf-8")
         err_file.write_text(exc.stderr or "", encoding="utf-8")
-        return participant
+        return finish_participant_timing(participant, started_monotonic)
     except OSError as exc:
         participant.status = "error"
         participant.notes = str(exc)
-        return participant
+        return finish_participant_timing(participant, started_monotonic)
     finally:
         shutil.rmtree(cwd, ignore_errors=True)
 
@@ -391,6 +461,12 @@ def run_participant(participant: Participant, review_input: str, output_dir: Pat
         participant.notes = "reviewer exited successfully but produced no stdout"
     else:
         participant.status = "ran"
+    return finish_participant_timing(participant, started_monotonic)
+
+
+def finish_participant_timing(participant: Participant, started_monotonic: float) -> Participant:
+    participant.completed_at = datetime.now(timezone.utc).isoformat()
+    participant.duration_seconds = round(time.monotonic() - started_monotonic, 3)
     return participant
 
 

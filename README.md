@@ -35,6 +35,8 @@ External reviewers propose candidates and critiques. Codex verifies them against
 
 The runner does not silently downgrade. If a CLI, model, auth state, or effort setting is unavailable, the report says so clearly.
 
+Reviewer CLIs run independently and in parallel by default, up to `--jobs 4` or `PEER_REVIEW_JOBS`. Use `--jobs 1` when debugging one reviewer at a time.
+
 ## Install
 
 In Codex, install the primary skill:
@@ -119,6 +121,14 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.
 ```
 
 By default a run exits nonzero if any requested reviewer fails. Add `--allow-partial` only when a degraded council is acceptable.
+
+Limit or disable parallelism for a run:
+
+```bash
+python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.py" \
+  --jobs 1 \
+  README.md src tests
+```
 
 ## Requirements
 

@@ -4,6 +4,8 @@ import importlib.util
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -161,6 +163,33 @@ class RunnerTests(unittest.TestCase):
 
         self.assertEqual(runner.run_exit_code(results, allow_partial=False), 1)
         self.assertEqual(runner.run_exit_code(results, allow_partial=True), 0)
+
+    def test_ready_reviewers_run_concurrently_when_jobs_allows(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+        participants = [
+            runner.Participant("claude", "Claude", "claude", "/bin/claude", "test", "m", "e", "s", "ready"),
+            runner.Participant("gemini", "Gemini", "gemini", "/bin/gemini", "test", "m", "e", "s", "ready"),
+        ]
+        active = 0
+        max_active = 0
+        lock = threading.Lock()
+
+        def fake_runner(participant, review_input, output_dir, timeout_seconds):
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            time.sleep(0.1)
+            with lock:
+                active -= 1
+            participant.status = "ran"
+            return participant
+
+        results = runner.run_participants(participants, "prompt", Path("/tmp"), timeout_seconds=5, jobs=2, runner=fake_runner)
+
+        self.assertEqual([item.key for item in results], ["claude", "gemini"])
+        self.assertTrue(all(item.status == "ran" for item in results))
+        self.assertEqual(max_active, 2)
 
 
 if __name__ == "__main__":
