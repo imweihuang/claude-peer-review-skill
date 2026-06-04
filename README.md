@@ -11,6 +11,7 @@ Compatibility entry points:
 - `claude-peer-review`: Claude-only preset for the unified runner.
 - `gpt-peer-review`: Codex/GPT-only preset for the unified runner.
 - `claude-gpt-peer-review`: Claude plus Codex/GPT preset for the unified runner.
+- `chatgpt-pro-peer-review`: browser-backed ChatGPT GPT-5.5 Pro / Extended Pro review.
 
 The core pattern is:
 
@@ -51,6 +52,7 @@ Optional compatibility installs:
 Install the Codex skill from https://github.com/imweihuang/claude-peer-review-skill/tree/main/claude-peer-review
 Install the Codex skill from https://github.com/imweihuang/claude-peer-review-skill/tree/main/gpt-peer-review
 Install the Codex skill from https://github.com/imweihuang/claude-peer-review-skill/tree/main/claude-gpt-peer-review
+Install the Codex skill from https://github.com/imweihuang/claude-peer-review-skill/tree/main/chatgpt-pro-peer-review
 ```
 
 Manual install:
@@ -61,6 +63,7 @@ cp -R peer-review "${CODEX_HOME:-$HOME/.codex}/skills/"
 cp -R claude-peer-review "${CODEX_HOME:-$HOME/.codex}/skills/"
 cp -R gpt-peer-review "${CODEX_HOME:-$HOME/.codex}/skills/"
 cp -R claude-gpt-peer-review "${CODEX_HOME:-$HOME/.codex}/skills/"
+cp -R chatgpt-pro-peer-review "${CODEX_HOME:-$HOME/.codex}/skills/"
 ```
 
 Restart Codex so the new skill metadata is discovered.
@@ -79,6 +82,7 @@ Specific presets:
 Use $claude-peer-review to run Claude as a code-audit peer on this repo.
 Use $gpt-peer-review to run GPT-5.5 as a code-audit peer on this repo.
 Use $claude-gpt-peer-review to ask both Claude and GPT for independent production-readiness reviews.
+Use $chatgpt-pro-peer-review to ask ChatGPT GPT-5.5 Pro / Extended Pro through the browser.
 ```
 
 Preflight local CLIs and requested settings:
@@ -138,6 +142,7 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.
 - `gemini` CLI installed and authenticated for Gemini reviews
 - `grok` CLI installed and authenticated for Grok Build reviews
 - Git installed for tracked-file context selection
+- Chrome with the Codex Chrome Extension and a logged-in ChatGPT Pro session for `chatgpt-pro-peer-review`
 
 If a required CLI is unavailable or unauthenticated, the skill reports that status rather than pretending an internal self-review is an external review.
 
@@ -200,6 +205,9 @@ gpt-peer-review/
   SKILL.md
   agents/openai.yaml
 claude-gpt-peer-review/
+  SKILL.md
+  agents/openai.yaml
+chatgpt-pro-peer-review/
   SKILL.md
   agents/openai.yaml
 ```

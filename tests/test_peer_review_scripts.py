@@ -13,6 +13,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONTEXT_SCRIPT = REPO_ROOT / "peer-review" / "scripts" / "build_review_context.py"
 RUNNER_SCRIPT = REPO_ROOT / "peer-review" / "scripts" / "run_peer_review.py"
+CHATGPT_PRO_SKILL = REPO_ROOT / "chatgpt-pro-peer-review" / "SKILL.md"
+CHATGPT_PRO_METADATA = REPO_ROOT / "chatgpt-pro-peer-review" / "agents" / "openai.yaml"
 
 
 def load_module(path: Path, name: str):
@@ -190,6 +192,26 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual([item.key for item in results], ["claude", "gemini"])
         self.assertTrue(all(item.status == "ran" for item in results))
         self.assertEqual(max_active, 2)
+
+
+class SkillDocumentationTests(unittest.TestCase):
+    def test_chatgpt_pro_skill_is_discoverable_and_guarded(self) -> None:
+        text = CHATGPT_PRO_SKILL.read_text(encoding="utf-8")
+
+        self.assertIn("name: chatgpt-pro-peer-review", text)
+        self.assertIn("Use when", text)
+        self.assertIn("GPT-5.5 Pro", text)
+        self.assertIn("Extended Pro", text)
+        self.assertIn("Chrome", text)
+        self.assertIn("Do not submit", text)
+        self.assertIn("context helper", text)
+        self.assertIn("manual browser", text)
+
+    def test_chatgpt_pro_skill_has_ui_metadata(self) -> None:
+        text = CHATGPT_PRO_METADATA.read_text(encoding="utf-8")
+
+        self.assertIn("display_name: \"ChatGPT Pro Peer Review\"", text)
+        self.assertIn("$chatgpt-pro-peer-review", text)
 
 
 if __name__ == "__main__":
