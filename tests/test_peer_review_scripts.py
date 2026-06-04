@@ -206,6 +206,10 @@ class SkillDocumentationTests(unittest.TestCase):
         self.assertIn("Do not submit", text)
         self.assertIn("context helper", text)
         self.assertIn("manual browser", text)
+        self.assertIn("45 minutes", text)
+        self.assertIn("CHATGPT_PRO_BROWSER_TIMEOUT_SECONDS", text)
+        self.assertIn("poll", text)
+        self.assertIn("handoff", text)
 
     def test_chatgpt_pro_skill_has_ui_metadata(self) -> None:
         text = CHATGPT_PRO_METADATA.read_text(encoding="utf-8")

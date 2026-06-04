@@ -85,6 +85,8 @@ Use $claude-gpt-peer-review to ask both Claude and GPT for independent productio
 Use $chatgpt-pro-peer-review to ask ChatGPT GPT-5.5 Pro / Extended Pro through the browser.
 ```
 
+`chatgpt-pro-peer-review` waits up to 45 minutes for Extended Pro by default, using repeated browser polls. Override with `CHATGPT_PRO_BROWSER_TIMEOUT_SECONDS`.
+
 Preflight local CLIs and requested settings:
 
 ```bash

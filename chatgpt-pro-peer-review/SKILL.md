@@ -12,6 +12,7 @@ Default reviewer:
 - Reviewer: `ChatGPT GPT-5.5 Pro`
 - Access path: Chrome browser at `https://chatgpt.com/`
 - Required visible selector: `Extended Pro` or `GPT-5.5 Pro`
+- Default wait limit: 45 minutes, override with `CHATGPT_PRO_BROWSER_TIMEOUT_SECONDS`
 - Report label: `ChatGPT GPT-5.5 Pro (manual browser)`
 
 Do not submit the prompt unless the visible ChatGPT selector confirms `Extended Pro` or `GPT-5.5 Pro`. If the selector is missing, shows a lower model, asks for login, blocks on CAPTCHA, or requires user action, stop and report the exact state.
@@ -39,6 +40,8 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/build_review_con
    - Verify the account is logged in and the model selector reads `Extended Pro` or `GPT-5.5 Pro`.
    - Paste the prompt into the composer and submit only after that selector check passes.
    - Wait until generation completes; a visible `Stop answering` control means the answer is still streaming.
+   - Extended Pro can think for a long time. Use repeated short poll calls instead of one long browser call. Default maximum wait is 45 minutes (`2700` seconds), overridable with `CHATGPT_PRO_BROWSER_TIMEOUT_SECONDS`.
+   - If the answer is still streaming after the wait limit, keep the ChatGPT tab as a `handoff`, report `manual_action_required`, and include the conversation URL so the user can continue or inspect it.
 
 4. Report honestly.
    - Include the observed model selector, conversation URL, whether the browser run completed, and the full participant label.
@@ -84,3 +87,17 @@ await tab.playwright.getByRole("button", { name: "Send prompt" }).click();
 ```
 
 Before the `fill` and `click`, inspect the page and verify the visible model selector says `Extended Pro` or `GPT-5.5 Pro`. Keep the ChatGPT tab as a deliverable if the user may want to inspect the browser conversation.
+
+Polling pattern after submit:
+
+```js
+const maxWaitSeconds = Number(process.env.CHATGPT_PRO_BROWSER_TIMEOUT_SECONDS || 2700);
+const started = Date.now();
+while (Date.now() - started < maxWaitSeconds * 1000) {
+  const text = await tab.playwright.evaluate(() => document.body.innerText || "");
+  if (!/Stop answering|Stop generating|Stop streaming/.test(text)) break;
+  await new Promise(resolve => setTimeout(resolve, 30000));
+}
+```
+
+Some browser automation calls have their own shorter execution cap, so for very long Extended Pro answers, run this as repeated 30- to 60-second polling calls from Codex rather than a single monolithic wait.
