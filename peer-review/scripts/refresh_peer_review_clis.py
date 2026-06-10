@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 
 DEFAULTS = {
-    "claude": {"model": "claude-opus-4-8", "effort": "max"},
+    "claude": {"model": "claude-fable-5", "effort": "xhigh"},
     "codex": {"model": "gpt-5.5", "effort": "xhigh"},
     "gemini": {"model": "cli-default", "effort": "not-cli-exposed"},
     "grok": {"model": "grok-build", "effort": "max; reasoning_effort=high"},
@@ -177,9 +177,14 @@ def collect_model_reports() -> list[ModelReport]:
 
 def claude_model_report() -> ModelReport:
     help_text = command_output(["claude", "--help"])
-    effort_ok = "max" in help_text and "--effort" in help_text
-    status = "confirmed" if effort_ok else "needs_manual_check"
-    evidence = "`claude --help` exposes --effort max" if effort_ok else "`claude --help` did not confirm max effort"
+    effort_ok = "xhigh" in help_text and "--effort" in help_text
+    model_ok = "claude-fable-5" in help_text or "'fable'" in help_text or "fable" in help_text
+    status = "confirmed" if effort_ok and model_ok else "needs_manual_check"
+    evidence = (
+        "`claude --help` exposes claude-fable-5/fable and --effort xhigh"
+        if status == "confirmed"
+        else "`claude --help` did not confirm claude-fable-5 with xhigh effort"
+    )
     return model_report("claude", "Claude", DEFAULTS["claude"]["model"], DEFAULTS["claude"]["effort"], status, evidence)
 
 

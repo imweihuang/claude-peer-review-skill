@@ -173,9 +173,9 @@ def preflight_participant(key: str) -> Participant:
             key=key,
             label="Claude",
             cli="claude",
-            model=os.environ.get("PEER_REVIEW_CLAUDE_MODEL", "claude-opus-4-8"),
-            effort=os.environ.get("PEER_REVIEW_CLAUDE_EFFORT", "max"),
-            effort_status="requested with --effort",
+            model=os.environ.get("PEER_REVIEW_CLAUDE_MODEL", "claude-fable-5"),
+            effort=os.environ.get("PEER_REVIEW_CLAUDE_EFFORT", "xhigh"),
+            effort_status="requested with --effort xhigh (Extra)",
         )
     if key == "codex":
         participant = make_participant(

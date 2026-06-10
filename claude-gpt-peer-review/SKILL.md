@@ -11,7 +11,7 @@ Default reviewer settings:
 
 | Reviewer | CLI | Model | Effort |
 | --- | --- | --- | --- |
-| Claude | `claude` | `claude-opus-4-8` | `max` |
+| Claude | `claude` | `claude-fable-5` | Extra (`xhigh`) |
 | Codex/GPT | `codex` | `gpt-5.5` | `xhigh` |
 
 Do not silently downgrade either reviewer. If a CLI, model, auth state, or effort is unavailable, report that clearly and ask before using a fallback.

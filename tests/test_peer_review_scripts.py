@@ -7,6 +7,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -98,6 +99,19 @@ class ContextBuilderTests(unittest.TestCase):
 
 
 class RunnerTests(unittest.TestCase):
+    def test_claude_defaults_use_fable_5_extra_effort(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+        with (
+            mock.patch.dict("os.environ", {}, clear=True),
+            mock.patch.object(runner.shutil, "which", return_value="/bin/claude"),
+            mock.patch.object(runner, "get_version", return_value="test"),
+        ):
+            participant = runner.preflight_participant("claude")
+
+        self.assertEqual(participant.requested_model, "claude-fable-5")
+        self.assertEqual(participant.requested_effort, "xhigh")
+        self.assertIn("Extra", participant.effort_status)
+
     def test_gemini_command_skips_trust_for_headless_run(self) -> None:
         runner = load_module(RUNNER_SCRIPT, "run_peer_review")
         participant = runner.Participant(

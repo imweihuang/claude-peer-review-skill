@@ -10,13 +10,13 @@ This is a compatibility entry point for Claude-only peer review. Use the unified
 Default Claude settings:
 
 - CLI: `claude`
-- Model: `claude-opus-4-8`
-- Effort: `max`
+- Model: `claude-fable-5` (Fable 5, 1M context)
+- Effort: Extra (`xhigh` in the Claude CLI)
 - Tools: empty allowlist by default
 - Session persistence: disabled
 - Budget: `PEER_REVIEW_CLAUDE_MAX_BUDGET_USD`, default `3`
 
-Do not silently downgrade to Sonnet, a lower Opus version, or a lower effort. If Claude CLI, Opus 4.8, auth, or max effort is unavailable, report that clearly and ask before using a fallback.
+Do not silently downgrade to Opus, Sonnet, an older Fable model, or a lower effort. If Claude CLI, Fable 5, auth, or Extra effort (`xhigh`) is unavailable, report that clearly and ask before using a fallback.
 
 Run preflight:
 
