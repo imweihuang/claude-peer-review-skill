@@ -130,7 +130,6 @@ Use these env vars for one run:
 PEER_REVIEW_REVIEWERS=claude,codex,gemini,grok
 PEER_REVIEW_CLAUDE_MODEL=claude-fable-5
 PEER_REVIEW_CLAUDE_EFFORT=xhigh
-PEER_REVIEW_CLAUDE_MAX_BUDGET_USD=3
 PEER_REVIEW_CODEX_MODEL=gpt-5.5
 PEER_REVIEW_CODEX_EFFORT=xhigh
 PEER_REVIEW_GEMINI_MODEL=cli-default
@@ -140,6 +139,8 @@ PEER_REVIEW_GROK_REASONING_EFFORT=high
 PEER_REVIEW_GROK_MAX_TURNS=4
 PEER_REVIEW_JOBS=4
 ```
+
+Set `PEER_REVIEW_CLAUDE_MAX_BUDGET_USD` only when a Claude run needs an explicit `--max-budget-usd` cap; there is no default budget cap.
 
 Do not use a lower model or lower effort unless the user explicitly approves the fallback.
 

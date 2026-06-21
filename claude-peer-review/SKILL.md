@@ -14,7 +14,7 @@ Default Claude settings:
 - Effort: Extra (`xhigh` in the Claude CLI)
 - Tools: empty allowlist by default
 - Session persistence: disabled
-- Budget: `PEER_REVIEW_CLAUDE_MAX_BUDGET_USD`, default `3`
+- Budget: no default cap; set `PEER_REVIEW_CLAUDE_MAX_BUDGET_USD` only when a run needs an explicit `--max-budget-usd` cap
 
 Do not silently downgrade to Opus, Sonnet, an older Fable model, or a lower effort. If Claude CLI, Fable 5, auth, or Extra effort (`xhigh`) is unavailable, report that clearly and ask before using a fallback.
 

@@ -472,24 +472,22 @@ def finish_participant_timing(participant: Participant, started_monotonic: float
 
 def command_for(participant: Participant, review_input: str, cwd: Path) -> tuple[list[str], str | None]:
     if participant.key == "claude":
-        budget = os.environ.get("PEER_REVIEW_CLAUDE_MAX_BUDGET_USD", "3")
         tools = os.environ.get("PEER_REVIEW_CLAUDE_TOOLS", "")
-        return (
-            [
-                "claude",
-                "-p",
-                "--tools",
-                tools,
-                "--no-session-persistence",
-                "--model",
-                participant.requested_model,
-                "--effort",
-                participant.requested_effort,
-                "--max-budget-usd",
-                budget,
-            ],
-            review_input,
-        )
+        cmd = [
+            "claude",
+            "-p",
+            "--tools",
+            tools,
+            "--no-session-persistence",
+            "--model",
+            participant.requested_model,
+            "--effort",
+            participant.requested_effort,
+        ]
+        budget = os.environ.get("PEER_REVIEW_CLAUDE_MAX_BUDGET_USD")
+        if budget:
+            cmd.extend(["--max-budget-usd", budget])
+        return (cmd, review_input)
     if participant.key == "codex":
         return (
             [

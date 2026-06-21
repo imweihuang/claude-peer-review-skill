@@ -112,6 +112,44 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(participant.requested_effort, "xhigh")
         self.assertIn("Extra", participant.effort_status)
 
+    def test_claude_command_has_no_default_budget_cap(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+        participant = runner.Participant(
+            key="claude",
+            label="Claude",
+            cli="claude",
+            cli_path="/bin/claude",
+            cli_version="test",
+            requested_model="claude-fable-5",
+            requested_effort="xhigh",
+            effort_status="test",
+            status="ready",
+        )
+        with mock.patch.dict("os.environ", {}, clear=True):
+            cmd, stdin_text = runner.command_for(participant, "prompt", Path("/tmp"))
+
+        self.assertNotIn("--max-budget-usd", cmd)
+        self.assertEqual(stdin_text, "prompt")
+
+    def test_claude_command_uses_explicit_budget_override(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+        participant = runner.Participant(
+            key="claude",
+            label="Claude",
+            cli="claude",
+            cli_path="/bin/claude",
+            cli_version="test",
+            requested_model="claude-fable-5",
+            requested_effort="xhigh",
+            effort_status="test",
+            status="ready",
+        )
+        with mock.patch.dict("os.environ", {"PEER_REVIEW_CLAUDE_MAX_BUDGET_USD": "12"}, clear=True):
+            cmd, _ = runner.command_for(participant, "prompt", Path("/tmp"))
+
+        self.assertIn("--max-budget-usd", cmd)
+        self.assertEqual(cmd[cmd.index("--max-budget-usd") + 1], "12")
+
     def test_gemini_command_skips_trust_for_headless_run(self) -> None:
         runner = load_module(RUNNER_SCRIPT, "run_peer_review")
         participant = runner.Participant(
