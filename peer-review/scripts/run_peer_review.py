@@ -173,7 +173,7 @@ def preflight_participant(key: str) -> Participant:
             key=key,
             label="Claude",
             cli="claude",
-            model=os.environ.get("PEER_REVIEW_CLAUDE_MODEL", "claude-fable-5"),
+            model=os.environ.get("PEER_REVIEW_CLAUDE_MODEL", "opus"),
             effort=os.environ.get("PEER_REVIEW_CLAUDE_EFFORT", "xhigh"),
             effort_status="requested with --effort xhigh (Extra)",
         )

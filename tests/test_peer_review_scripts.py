@@ -99,7 +99,7 @@ class ContextBuilderTests(unittest.TestCase):
 
 
 class RunnerTests(unittest.TestCase):
-    def test_claude_defaults_use_fable_5_extra_effort(self) -> None:
+    def test_claude_defaults_use_opus_48_extra_effort(self) -> None:
         runner = load_module(RUNNER_SCRIPT, "run_peer_review")
         with (
             mock.patch.dict("os.environ", {}, clear=True),
@@ -108,7 +108,7 @@ class RunnerTests(unittest.TestCase):
         ):
             participant = runner.preflight_participant("claude")
 
-        self.assertEqual(participant.requested_model, "claude-fable-5")
+        self.assertEqual(participant.requested_model, "opus")
         self.assertEqual(participant.requested_effort, "xhigh")
         self.assertIn("Extra", participant.effort_status)
 
@@ -120,7 +120,7 @@ class RunnerTests(unittest.TestCase):
             cli="claude",
             cli_path="/bin/claude",
             cli_version="test",
-            requested_model="claude-fable-5",
+            requested_model="opus",
             requested_effort="xhigh",
             effort_status="test",
             status="ready",
@@ -139,7 +139,7 @@ class RunnerTests(unittest.TestCase):
             cli="claude",
             cli_path="/bin/claude",
             cli_version="test",
-            requested_model="claude-fable-5",
+            requested_model="opus",
             requested_effort="xhigh",
             effort_status="test",
             status="ready",

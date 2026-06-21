@@ -29,7 +29,7 @@ External reviewers propose candidates and critiques. Codex verifies them against
 
 | Reviewer | CLI | Default model | Default effort |
 | --- | --- | --- | --- |
-| Claude | `claude` | `claude-fable-5` | Extra (`xhigh`) |
+| Claude | `claude` | `opus` (Opus 4.8 alias) | Extra (`xhigh`) |
 | Codex/GPT | `codex` | `gpt-5.5` | `xhigh` |
 | Gemini | `gemini` | `cli-default` | reported as `not-cli-exposed` unless the local CLI exposes a thinking flag |
 | Grok Build | `grok` | `grok-build` | `max`; `reasoning_effort=high` |
