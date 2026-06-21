@@ -175,7 +175,7 @@ def preflight_participant(key: str) -> Participant:
             cli="claude",
             model=os.environ.get("PEER_REVIEW_CLAUDE_MODEL", "opus"),
             effort=os.environ.get("PEER_REVIEW_CLAUDE_EFFORT", "xhigh"),
-            effort_status="requested with --effort xhigh (Extra)",
+            effort_status="requested with --effort xhigh for Opus 4.8",
         )
     if key == "codex":
         participant = make_participant(

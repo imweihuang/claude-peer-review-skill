@@ -13,7 +13,7 @@ Default reviewer roster:
 
 | Reviewer | CLI | Default model | Default effort |
 | --- | --- | --- | --- |
-| Claude | `claude` | `opus` (Opus 4.8 alias) | Extra (`xhigh`) |
+| Claude | `claude` | Opus 4.8 via `opus` alias | `xhigh` |
 | Codex/GPT | `codex` | `gpt-5.5` | `xhigh` |
 | Gemini | `gemini` | `cli-default` | reported as `not-cli-exposed` unless the local CLI exposes a thinking flag |
 | Grok Build | `grok` | `grok-build` | `max`; `reasoning_effort=high` |

@@ -11,7 +11,7 @@ Default reviewer settings:
 
 | Reviewer | CLI | Model | Effort |
 | --- | --- | --- | --- |
-| Claude | `claude` | `opus` (Opus 4.8 alias) | Extra (`xhigh`) |
+| Claude | `claude` | Opus 4.8 via `opus` alias | `xhigh` |
 | Codex/GPT | `codex` | `gpt-5.5` | `xhigh` |
 
 Do not silently downgrade either reviewer. If a CLI, model, auth state, or effort is unavailable, report that clearly and ask before using a fallback.
