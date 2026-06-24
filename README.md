@@ -4,7 +4,7 @@ This repository contains Codex skills for safe external software peer review.
 
 Primary skill:
 
-- `peer-review`: run independent Claude, Codex/GPT, Gemini, and Grok Build CLI peer reviews, then have Codex reconcile and validate the findings.
+- `peer-review`: run independent Claude, Codex/GPT, and Grok Build CLI peer reviews by default, with Gemini opt-in, then have Codex reconcile and validate the findings.
 
 Compatibility entry points:
 
@@ -31,8 +31,9 @@ External reviewers propose candidates and critiques. Codex verifies them against
 | --- | --- | --- | --- |
 | Claude | `claude` | Opus 4.8 via `opus` alias | `xhigh` |
 | Codex/GPT | `codex` | `gpt-5.5` | `xhigh` |
-| Gemini | `gemini` | `cli-default` | reported as `not-cli-exposed` unless the local CLI exposes a thinking flag |
-| Grok Build | `grok` | `grok-build` | `max`; `reasoning_effort=high` |
+| Grok Build | `grok` | `grok-composer-2.5-fast` | `max`; `reasoning_effort=high` |
+
+Gemini remains supported but is opt-in through `--reviewers gemini` or `--reviewers all-with-gemini`.
 
 The runner does not silently downgrade. If a CLI, model, auth state, or effort setting is unavailable, the report says so clearly.
 
@@ -112,11 +113,14 @@ Run a targeted review:
 ```bash
 python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.py" \
   --mode "Diff Critique" \
+  --review-scope strict \
   --milestone "current milestone" \
   --focus "correctness bugs and behavioral regressions" \
   --focus "missing tests and security boundaries" \
   README.md src tests
 ```
+
+`--review-scope` controls evidence policy. Use `strict` for implementation, launch, schema, security, and diff reviews; `broad-repo` for internal architecture reviews needing wider curated context; `strategy-open` or `web-research` for open-ended/current-info questions where external source discovery may help. The runner's default `auto` fails closed to `strict`; the skill should pass an explicit scope after reading the user's request.
 
 Run a subset:
 
@@ -141,7 +145,7 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.
 - Codex with skills enabled
 - `claude` CLI installed and authenticated for Claude reviews
 - `codex` CLI installed and authenticated for GPT reviews
-- `gemini` CLI installed and authenticated for Gemini reviews
+- `gemini` CLI installed and authenticated for Gemini reviews, if requested
 - `grok` CLI installed and authenticated for Grok Build reviews
 - Git installed for tracked-file context selection
 - Chrome with the Codex Chrome Extension and a logged-in ChatGPT Pro session for `chatgpt-pro-peer-review`
@@ -162,6 +166,8 @@ The bundled context helper only includes selected files and skips common unsafe 
 - paths outside the repo root
 
 It also fails closed outside git by default, rejects common secret/token content patterns, blocks symlink targets outside the root, and emits an in-band `CONTEXT OMITTED` marker when the total byte limit drops files.
+
+Reviewer-side web/source research is disabled for strict and broad-repo scopes. In strategy-open and web-research scopes, it is allowed only where a reviewer runtime exposes a verified safe toggle; the manifest reports each reviewer’s actual web/tool status. Codex/GPT remains read-only even when external research is requested.
 
 Inspect selected context before running reviewers:
 

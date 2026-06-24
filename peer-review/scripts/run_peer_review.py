@@ -5,6 +5,7 @@ import argparse
 import concurrent.futures
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -18,15 +19,36 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-DEFAULT_REVIEWERS = ("claude", "codex", "gemini", "grok")
+DEFAULT_REVIEWERS = ("claude", "codex", "grok")
+SUPPORTED_REVIEWERS = ("claude", "codex", "gemini", "grok")
 REVIEWER_ALIASES = {
     "all": DEFAULT_REVIEWERS,
+    "all-with-gemini": SUPPORTED_REVIEWERS,
     "gpt": ("codex",),
     "openai": ("codex",),
     "grok-build": ("grok",),
     "claude-gpt": ("claude", "codex"),
     "claude-codex": ("claude", "codex"),
 }
+DEFAULT_GROK_MAX_TURNS = "32"
+DEFAULT_GROK_WEB_MAX_TURNS = "64"
+REVIEW_SCOPES = ("auto", "strict", "broad-repo", "strategy-open", "web-research")
+WEB_RESEARCH_SCOPES = {"strategy-open", "web-research"}
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+NOTE_PRIORITY_NEEDLES = (
+    "error:",
+    "max turns reached",
+    "session limit",
+    "rate limit",
+    "quota",
+    "ineligibletiererror",
+    "no auth credentials",
+    "authentication",
+    "not logged in",
+    "modelnotfound",
+    "requested entity was not found",
+    "timed out",
+)
 
 
 @dataclass
@@ -47,6 +69,20 @@ class Participant:
     started_at: str | None = None
     completed_at: str | None = None
     duration_seconds: float | None = None
+    review_scope_effective: str | None = None
+    web_search_enabled: bool = False
+    tools_enabled: bool = False
+
+
+@dataclass(frozen=True)
+class ReviewPolicy:
+    requested_scope: str
+    effective_scope: str
+    context_breadth: str
+    external_research: str
+    web_search_requested: bool
+    evidence_basis_required: bool
+    note: str
 
 
 ParticipantRunner = Callable[[Participant, str, Path, int], Participant]
@@ -64,6 +100,16 @@ def main() -> int:
         help="Comma-separated reviewers: all, claude, codex/gpt, gemini, grok.",
     )
     parser.add_argument("--mode", default="Architecture Review", help="Review mode label.")
+    parser.add_argument(
+        "--review-scope",
+        default="auto",
+        choices=REVIEW_SCOPES,
+        help=(
+            "Evidence policy: auto fails closed to strict in the runner; the skill should pass an explicit "
+            "scope after reading the user's request. strict and broad-repo disable external research; "
+            "strategy-open and web-research allow external research only where a reviewer runtime supports it."
+        ),
+    )
     parser.add_argument("--project", default=None, help="Project name for the review prompt.")
     parser.add_argument("--milestone", default="current milestone", help="Milestone or launch gate under review.")
     parser.add_argument("--focus", action="append", default=[], help="Focus area. May be repeated.")
@@ -97,9 +143,11 @@ def main() -> int:
     root = Path(args.root).resolve()
     reviewers = parse_reviewers(args.reviewers)
     participants = [preflight_participant(key) for key in reviewers]
+    review_policy = resolve_review_policy(args.review_scope)
+    apply_review_policy(participants, review_policy)
 
     if args.preflight or args.dry_run:
-        print_summary(participants, output_dir=None, dry_run=True)
+        print_summary(participants, output_dir=None, dry_run=True, review_policy=review_policy)
         return 0 if all(p.status == "ready" for p in participants) else 2
 
     if not args.paths:
@@ -108,7 +156,7 @@ def main() -> int:
     output_dir = Path(args.output_dir).resolve() if args.output_dir else Path(tempfile.mkdtemp(prefix="peer-review-"))
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    prompt = build_prompt(args, root)
+    prompt = build_prompt(args, root, review_policy)
     context = build_context(args, root)
     review_input = f"{prompt}\n\n# Selected Repository Context\n{context}"
 
@@ -118,6 +166,7 @@ def main() -> int:
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "root": str(root),
         "mode": args.mode,
+        "review_scope": review_policy_manifest(review_policy),
         "project": args.project or root.name,
         "milestone": args.milestone,
         "reviewers_requested": reviewers,
@@ -128,7 +177,7 @@ def main() -> int:
     }
     (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
-    print_summary(results, output_dir=output_dir, dry_run=False)
+    print_summary(results, output_dir=output_dir, dry_run=False, review_policy=review_policy)
     return run_exit_code(results, args.allow_partial)
 
 
@@ -140,11 +189,78 @@ def parse_reviewers(raw: str) -> list[str]:
             continue
         expanded = REVIEWER_ALIASES.get(key, (key,))
         for reviewer in expanded:
-            if reviewer not in DEFAULT_REVIEWERS:
-                raise SystemExit(f"unknown reviewer {reviewer!r}; expected one of {', '.join(DEFAULT_REVIEWERS)}")
+            if reviewer not in SUPPORTED_REVIEWERS:
+                raise SystemExit(f"unknown reviewer {reviewer!r}; expected one of {', '.join(SUPPORTED_REVIEWERS)}")
             if reviewer not in selected:
                 selected.append(reviewer)
     return selected or list(DEFAULT_REVIEWERS)
+
+
+def resolve_review_policy(requested_scope: str) -> ReviewPolicy:
+    if requested_scope not in REVIEW_SCOPES:
+        raise argparse.ArgumentTypeError(f"unknown review scope {requested_scope!r}; expected one of {', '.join(REVIEW_SCOPES)}")
+    effective_scope = "strict" if requested_scope == "auto" else requested_scope
+    web_search_requested = effective_scope in WEB_RESEARCH_SCOPES
+    if effective_scope == "strict":
+        context_breadth = "curated"
+        external_research = "disabled"
+    elif effective_scope == "broad-repo":
+        context_breadth = "broad curated repo"
+        external_research = "disabled"
+    elif effective_scope == "strategy-open":
+        context_breadth = "strategic curated repo"
+        external_research = "allowed_if_supported"
+    else:
+        context_breadth = "curated repo plus external sources"
+        external_research = "allowed_if_supported"
+    note = (
+        "auto defaults to strict inside the runner; the skill must pass an explicit scope after reading the user request"
+        if requested_scope == "auto"
+        else f"{effective_scope} scope selected explicitly"
+    )
+    return ReviewPolicy(
+        requested_scope=requested_scope,
+        effective_scope=effective_scope,
+        context_breadth=context_breadth,
+        external_research=external_research,
+        web_search_requested=web_search_requested,
+        evidence_basis_required=True,
+        note=note,
+    )
+
+
+def review_policy_manifest(policy: ReviewPolicy) -> dict[str, object]:
+    return {
+        "requested_scope": policy.requested_scope,
+        "effective_scope": policy.effective_scope,
+        "context_breadth": policy.context_breadth,
+        "external_research": policy.external_research,
+        "web_search_requested": policy.web_search_requested,
+        "evidence_basis_required": policy.evidence_basis_required,
+        "note": policy.note,
+    }
+
+
+def apply_review_policy(participants: list[Participant], policy: ReviewPolicy) -> None:
+    for participant in participants:
+        participant.review_scope_effective = policy.effective_scope
+        participant.web_search_enabled = policy.web_search_requested and participant.key == "grok"
+        participant.tools_enabled = bool(os.environ.get("PEER_REVIEW_CLAUDE_TOOLS", "")) if participant.key == "claude" else False
+        if not policy.web_search_requested:
+            continue
+        if participant.key == "grok":
+            append_note(participant, "web search requested; Grok web-disable flag omitted for this scope")
+        elif participant.key == "claude":
+            if participant.tools_enabled:
+                append_note(participant, "external research requested; Claude tools come from PEER_REVIEW_CLAUDE_TOOLS")
+            else:
+                append_note(participant, "external research requested, but no verified Claude web tool is configured")
+        else:
+            append_note(participant, "external research requested, but no verified web-search toggle is configured for this reviewer")
+
+
+def append_note(participant: Participant, note: str) -> None:
+    participant.notes = f"{participant.notes}; {note}" if participant.notes else note
 
 
 def positive_int(raw: str) -> int:
@@ -206,7 +322,7 @@ def preflight_participant(key: str) -> Participant:
             key=key,
             label="Grok Build",
             cli="grok",
-            model=os.environ.get("PEER_REVIEW_GROK_MODEL", "grok-build"),
+            model=os.environ.get("PEER_REVIEW_GROK_MODEL", "grok-composer-2.5-fast"),
             effort=f"{effort}; reasoning_effort={reasoning}",
             effort_status="requested with --effort and --reasoning-effort",
         )
@@ -303,12 +419,14 @@ def grok_model_status(model: str) -> str:
     return "ready"
 
 
-def build_prompt(args: argparse.Namespace, root: Path) -> str:
+def build_prompt(args: argparse.Namespace, root: Path, review_policy: ReviewPolicy | None = None) -> str:
+    policy = review_policy or resolve_review_policy(getattr(args, "review_scope", "auto"))
     focus = args.focus or ["highest-risk correctness, architecture, security, data, test, and launch-readiness issues"]
     focus_lines = "\n".join(f"{index}. {item}" for index, item in enumerate(focus, start=1))
     extra = ""
     if args.prompt_file:
         extra = Path(args.prompt_file).read_text(encoding="utf-8")
+    scope_instructions = evidence_scope_instructions(policy)
     return textwrap.dedent(
         f"""
         You are acting as a candid strategist and senior peer reviewer for {args.project or root.name}.
@@ -322,19 +440,27 @@ def build_prompt(args: argparse.Namespace, root: Path) -> str:
         Review mode:
         {args.mode}
 
+        Review evidence scope:
+        - Requested scope: {policy.requested_scope}
+        - Effective scope: {policy.effective_scope}
+        - Context breadth: {policy.context_breadth}
+        - External research policy: {policy.external_research}
+
         Your task:
         Review the selected repository context below, especially:
         {focus_lines}
 
         Constraints:
-        - Use only the supplied context unless explicitly told otherwise.
+        {scope_instructions}
         - Do not inspect or request .env, secrets, credentials, private keys, runtime logs, untracked files, or unrelated user files.
         - Do not edit files.
-        - Ground findings in the provided code/docs.
+        - Ground repo findings in the provided code/docs.
         - Separate must-fix issues from strategic improvements.
         - Treat the current milestone seriously; do not demand future-scale work unless it blocks this milestone.
         - Do not give generic advice; tie recommendations to the provided context.
         - Prefer concise output and prioritize the highest-risk findings.
+        - Evidence basis: label each finding or recommendation as repo-grounded, external-source-grounded, or speculative.
+        - Repo-grounded means supported by supplied repository context. External-source-grounded means supported by cited external sources. Speculative means plausible but not verified.
 
         Output format:
         1. What is strong
@@ -346,6 +472,25 @@ def build_prompt(args: argparse.Namespace, root: Path) -> str:
         7. Any product/schema/architecture insight that changes your view of the project
         """
     ).strip() + ("\n\nAdditional user instructions:\n" + extra.strip() if extra.strip() else "")
+
+
+def evidence_scope_instructions(policy: ReviewPolicy) -> str:
+    if policy.web_search_requested:
+        return textwrap.dedent(
+            """
+            - You may use external web/source research only if your runtime supports it.
+            - Cite every external source with a URL or source name for external-source-grounded claims.
+            - Do not treat external claims as repo facts; verify repo impact against the supplied context.
+            - Do not inspect local files beyond the supplied context, even in web-research scope.
+            """
+        ).strip()
+    return textwrap.dedent(
+        """
+        - Use only the supplied context.
+        - Do not use web search or external sources.
+        - If a point needs outside confirmation, label it speculative or needs verification instead of asserting it as fact.
+        """
+    ).strip()
 
 
 def build_context(args: argparse.Namespace, root: Path) -> str:
@@ -533,33 +678,34 @@ def command_for(participant: Participant, review_input: str, cwd: Path) -> tuple
         prompt_file.write_text(review_input, encoding="utf-8")
         effort = os.environ.get("PEER_REVIEW_GROK_EFFORT", "max")
         reasoning = os.environ.get("PEER_REVIEW_GROK_REASONING_EFFORT", "high")
-        max_turns = os.environ.get("PEER_REVIEW_GROK_MAX_TURNS", "4")
+        default_turns = DEFAULT_GROK_WEB_MAX_TURNS if participant.web_search_enabled else DEFAULT_GROK_MAX_TURNS
+        max_turns = os.environ.get("PEER_REVIEW_GROK_MAX_TURNS", default_turns)
         subprocess.run(["git", "init"], cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-        return (
-            [
-                "grok",
-                "--model",
-                participant.requested_model,
-                "--effort",
-                effort,
-                "--reasoning-effort",
-                reasoning,
-                "--max-turns",
-                max_turns,
-                "--no-subagents",
-                "--disable-web-search",
-                "--tools",
-                "",
-                "--permission-mode",
-                "plan",
-                "--no-alt-screen",
-                "--output-format",
-                "plain",
-                "--prompt-file",
-                str(prompt_file),
-            ],
-            None,
-        )
+        cmd = [
+            "grok",
+            "--model",
+            participant.requested_model,
+            "--effort",
+            effort,
+            "--reasoning-effort",
+            reasoning,
+            "--max-turns",
+            max_turns,
+            "--no-subagents",
+        ]
+        if not participant.web_search_enabled:
+            cmd.append("--disable-web-search")
+        cmd += [
+            "--tools",
+            "",
+            "--no-plan",
+            "--no-alt-screen",
+            "--output-format",
+            "plain",
+            "--prompt-file",
+            str(prompt_file),
+        ]
+        return (cmd, None)
     raise AssertionError(participant.key)
 
 
@@ -582,25 +728,56 @@ def is_model_unavailable(text: str) -> bool:
 
 
 def short_note(text: str) -> str | None:
-    lines = [" ".join(line.strip().split()) for line in text.splitlines() if line.strip()]
+    lines = [clean_note_line(line) for line in text.splitlines()]
+    lines = [line for line in lines if line]
     if not lines:
         return None
-    return lines[0][:240]
+    for line in reversed(lines):
+        if is_priority_note(line):
+            return line[:240]
+    for line in reversed(lines):
+        if not is_warning_note(line):
+            return line[:240]
+    return lines[-1][:240]
+
+
+def clean_note_line(line: str) -> str:
+    return " ".join(ANSI_ESCAPE_RE.sub("", line).strip().split())
+
+
+def is_priority_note(line: str) -> bool:
+    lowered = line.lower()
+    return any(needle in lowered for needle in NOTE_PRIORITY_NEEDLES)
+
+
+def is_warning_note(line: str) -> bool:
+    lowered = line.lower()
+    return " warn " in f" {lowered} " or lowered.startswith("warn ")
 
 
 def shell_join(cmd: list[str]) -> str:
     return " ".join(shlex.quote(part) for part in cmd)
 
 
-def print_summary(participants: list[Participant], output_dir: Path | None, dry_run: bool) -> None:
+def print_summary(
+    participants: list[Participant],
+    output_dir: Path | None,
+    dry_run: bool,
+    review_policy: ReviewPolicy | None = None,
+) -> None:
     title = "Peer Review Dry Run" if dry_run else "Peer Review Run"
     print(f"# {title}")
     if output_dir:
         print(f"Output dir: {output_dir}")
         print(f"Manifest: {output_dir / 'manifest.json'}")
+    if review_policy:
+        print(
+            f"Review scope: requested `{review_policy.requested_scope}`, effective `{review_policy.effective_scope}`; "
+            f"external research `{review_policy.external_research}`"
+        )
     print()
-    print("| Reviewer | CLI version | Requested model | Requested effort | Effort status | Status |")
-    print("| --- | --- | --- | --- | --- | --- |")
+    print("| Reviewer | CLI version | Requested model | Requested effort | Effort status | Web search | Tools | Status |")
+    print("| --- | --- | --- | --- | --- | --- | --- | --- |")
     for item in participants:
         print(
             "| "
@@ -611,6 +788,8 @@ def print_summary(participants: list[Participant], output_dir: Path | None, dry_
                     f"`{item.requested_model}`",
                     f"`{item.requested_effort}`",
                     item.effort_status,
+                    "enabled" if item.web_search_enabled else "disabled",
+                    "enabled" if item.tools_enabled else "disabled",
                     item.status,
                 ]
             )

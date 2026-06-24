@@ -15,7 +15,7 @@ DEFAULTS = {
     "claude": {"model": "opus", "effort": "xhigh"},
     "codex": {"model": "gpt-5.5", "effort": "xhigh"},
     "gemini": {"model": "cli-default", "effort": "not-cli-exposed"},
-    "grok": {"model": "grok-build", "effort": "max; reasoning_effort=high"},
+    "grok": {"model": "grok-composer-2.5-fast", "effort": "max; reasoning_effort=high"},
 }
 
 

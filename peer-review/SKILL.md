@@ -15,8 +15,9 @@ Default reviewer roster:
 | --- | --- | --- | --- |
 | Claude | `claude` | Opus 4.8 via `opus` alias | `xhigh` |
 | Codex/GPT | `codex` | `gpt-5.5` | `xhigh` |
-| Gemini | `gemini` | `cli-default` | reported as `not-cli-exposed` unless the local CLI exposes a thinking flag |
-| Grok Build | `grok` | `grok-build` | `max`; `reasoning_effort=high` |
+| Grok Build | `grok` | `grok-composer-2.5-fast` | `max`; `reasoning_effort=high` |
+
+Gemini remains supported but is opt-in. Use `--reviewers all-with-gemini` or include `gemini` explicitly when Gemini's local CLI behavior is acceptable for the task.
 
 If a CLI, model, auth state, or effort setting is unavailable, report it clearly. Do not silently downgrade or present Codex self-review as external peer review.
 
@@ -35,11 +36,24 @@ Choose one focused mode before building context:
 
 Prefer targeted subsystem reviews over one giant whole-repo prompt.
 
+## Evidence Scope
+
+Auto-select evidence scope from the user's request before running reviewers. Always pass the selected scope with `--review-scope`; do not rely on the runner's `auto` default except as a fail-closed fallback.
+
+| Scope | Use For | Reviewer Evidence Policy |
+| --- | --- | --- |
+| `strict` | Diff critique, implementation correctness, security boundaries, launch readiness, data/schema, coverage audits, secrets-adjacent reviews | Supplied context only; no web/external sources |
+| `broad-repo` | Architecture or repo-wide reviews where missing internal context is the main risk | Broader curated repo context; no web/external sources |
+| `strategy-open` | Open-ended product, roadmap, architecture tradeoffs, adoption, or planning questions | Supplied context plus external knowledge/source research where a reviewer runtime safely supports it |
+| `web-research` | Current facts: vendor/API/library behavior, pricing, regulation, market/news, competitor state, model/CLI capability changes | Supplied context plus external web/source research where a reviewer runtime safely supports it; cite sources |
+
+Force `strict` for security-boundary, secret, deploy, schema-migration, production-readiness, bug/regression, or PR/diff reviews unless the user explicitly asks for external research and the added risk is justified. For strategic/current-info questions, prefer `strategy-open` or `web-research` so independent reviewers can reduce Codex's single-curator blind spot. Label external findings separately from repo-grounded findings.
+
 ## Workflow
 
 1. Define the review target.
-   - Identify project goal, milestone, review mode, and focus areas.
-   - If the user does not specify reviewers, use the default roster: Claude, Codex/GPT, Gemini, and Grok Build.
+   - Identify project goal, milestone, review mode, evidence scope, and focus areas.
+   - If the user does not specify reviewers, use the default roster: Claude, Codex/GPT, and Grok Build.
    - If the user requests a subset, pass it with `--reviewers claude`, `--reviewers gpt`, `--reviewers claude,gpt`, etc.
 
 2. Curate context.
@@ -85,6 +99,7 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/refresh_peer_rev
 ```bash
 python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.py" \
   --mode "Diff Critique" \
+  --review-scope strict \
   --milestone "current milestone" \
   --focus "correctness bugs and behavioral regressions" \
   --focus "missing tests and security boundaries" \
@@ -93,10 +108,11 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.
 
    - The runner keeps outputs separate and does not show one model's answer to another.
    - The runner runs independent reviewers in parallel by default, up to `--jobs 4` or `PEER_REVIEW_JOBS`. Use `--jobs 1` for sequential debugging.
-   - Claude runs with tools disabled and no session persistence.
+   - Claude runs with tools disabled and no session persistence unless an explicit `PEER_REVIEW_CLAUDE_TOOLS` override is set after verifying the local CLI tool name.
    - Codex/GPT runs in a temporary empty cwd with read-only sandboxing and ephemeral mode.
    - Gemini runs with `--skip-trust`, plan approval mode, and a sandbox where supported.
-   - Grok Build runs with subagents disabled, web search disabled, plan permission mode, no tool allowlist, an initialized empty temp git directory, and `PEER_REVIEW_GROK_MAX_TURNS` defaulting to `4`.
+   - Grok Build always runs with subagents disabled, interactive plan mode disabled, no tool allowlist, and an initialized empty temp git directory. In `strict` and `broad-repo`, web search is disabled and `PEER_REVIEW_GROK_MAX_TURNS` defaults to `32`; in `strategy-open` and `web-research`, the runner omits the web-disable flag and defaults Grok turns to `64` unless overridden.
+   - The manifest and summary disclose requested scope, effective scope, external research policy, and per-reviewer web/tool status. Some reviewers may remain repo-context-only even when external research is requested because their local CLI does not expose a verified safe web-search toggle.
    - By default the run exits nonzero if any requested reviewer fails. Use `--allow-partial` only when a degraded council is acceptable.
 
 6. Synthesize without outsourcing judgment.
@@ -109,6 +125,8 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.
      - direct conflict
      - speculative or unverifiable
    - Validate major findings against the repo before acting.
+   - Track evidence basis for important findings: `repo-grounded`, `external-source-grounded`, or `speculative`.
+   - Treat external-source-grounded findings as leads until Codex verifies local repo impact.
    - Classify each important finding as `accept and fix`, `accept and defer`, `reject with reason`, or `needs user decision`.
 
 7. Implement only the right scope.
@@ -117,9 +135,10 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.
    - Keep unrelated refactors out.
 
 8. Report the outcome.
-   - Include selected review mode, context selection, and the participant table from the runner.
-   - Include what each model actually participated with: CLI version, model, effort, and effort-status caveat.
+   - Include selected review mode, evidence scope, context selection, and the participant table from the runner.
+   - Include what each model actually participated with: CLI version, model, effort, effort-status caveat, web-search status, and tool status.
    - Include strongest agreement, strongest disagreement, accepted/deferred/rejected findings, edits made, and verification results.
+   - Separate repo-grounded findings from external-source-grounded or speculative findings.
    - Never paste secrets or raw `.env` values.
 
 ## Overrides
@@ -127,16 +146,16 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.
 Use these env vars for one run:
 
 ```bash
-PEER_REVIEW_REVIEWERS=claude,codex,gemini,grok
+PEER_REVIEW_REVIEWERS=claude,codex,grok
 PEER_REVIEW_CLAUDE_MODEL=opus
 PEER_REVIEW_CLAUDE_EFFORT=xhigh
 PEER_REVIEW_CODEX_MODEL=gpt-5.5
 PEER_REVIEW_CODEX_EFFORT=xhigh
 PEER_REVIEW_GEMINI_MODEL=cli-default
-PEER_REVIEW_GROK_MODEL=grok-build
+PEER_REVIEW_GROK_MODEL=grok-composer-2.5-fast
 PEER_REVIEW_GROK_EFFORT=max
 PEER_REVIEW_GROK_REASONING_EFFORT=high
-PEER_REVIEW_GROK_MAX_TURNS=4
+PEER_REVIEW_GROK_MAX_TURNS=32
 PEER_REVIEW_JOBS=4
 ```
 

@@ -14,6 +14,11 @@ Current milestone:
 Review mode:
 <Strategy Review | Data/Schema Review | Diff Critique | Launch Readiness | Coverage Audit | Deciding Vote>
 
+Review evidence scope:
+- Requested scope: <auto | strict | broad-repo | strategy-open | web-research>
+- Effective scope: <strict | broad-repo | strategy-open | web-research>
+- External research policy: <disabled | allowed_if_supported>
+
 Your task:
 Review the selected repository context below, especially:
 1. <focus area>
@@ -21,15 +26,17 @@ Review the selected repository context below, especially:
 3. <focus area>
 
 Constraints:
-- Use only the supplied context unless explicitly told otherwise.
+- For strict/broad-repo: use only the supplied context; do not use web search or external sources.
+- For strategy-open/web-research: you may use external web/source research only if your runtime supports it; cite every external source for external-source-grounded claims.
 - Do not inspect or request .env, secrets, credentials, private keys, runtime logs, untracked files, or unrelated user files.
 - Do not edit files.
-- Ground findings in the provided code/docs.
+- Ground repo findings in the provided code/docs.
 - Separate must-fix issues from strategic improvements.
 - Be honest, critical, and practical.
 - Treat the current milestone seriously; do not demand future-scale work unless it blocks this milestone.
 - Do not give generic advice; tie recommendations to the provided context.
 - Prefer concise output. Prioritize the highest-risk findings over exhaustive commentary.
+- Evidence basis: label each finding or recommendation as repo-grounded, external-source-grounded, or speculative.
 
 Output format:
 1. What is strong
@@ -55,4 +62,6 @@ For each important finding, decide:
 - accept and document/defer
 - reject with reason
 - needs user decision
+
+Treat external-source-grounded findings as leads until Codex verifies their local repo impact.
 ```

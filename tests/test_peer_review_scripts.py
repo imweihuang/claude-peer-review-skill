@@ -14,8 +14,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONTEXT_SCRIPT = REPO_ROOT / "peer-review" / "scripts" / "build_review_context.py"
 RUNNER_SCRIPT = REPO_ROOT / "peer-review" / "scripts" / "run_peer_review.py"
+REFRESH_SCRIPT = REPO_ROOT / "peer-review" / "scripts" / "refresh_peer_review_clis.py"
 CHATGPT_PRO_SKILL = REPO_ROOT / "chatgpt-pro-peer-review" / "SKILL.md"
 CHATGPT_PRO_METADATA = REPO_ROOT / "chatgpt-pro-peer-review" / "agents" / "openai.yaml"
+PEER_REVIEW_SKILL = REPO_ROOT / "peer-review" / "SKILL.md"
+README = REPO_ROOT / "README.md"
 
 
 def load_module(path: Path, name: str):
@@ -112,6 +115,24 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(participant.requested_effort, "xhigh")
         self.assertIn("xhigh", participant.effort_status)
 
+    def test_grok_defaults_use_composer_25_fast_model(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+        with (
+            mock.patch.dict("os.environ", {}, clear=True),
+            mock.patch.object(runner.shutil, "which", return_value="/bin/grok"),
+            mock.patch.object(runner, "get_version", return_value="test"),
+            mock.patch.object(runner, "grok_model_status", return_value="ready"),
+        ):
+            participant = runner.preflight_participant("grok")
+
+        self.assertEqual(participant.requested_model, "grok-composer-2.5-fast")
+        self.assertEqual(participant.requested_effort, "max; reasoning_effort=high")
+
+    def test_refresh_defaults_use_composer_25_fast_model(self) -> None:
+        refresh = load_module(REFRESH_SCRIPT, "refresh_peer_review_clis")
+
+        self.assertEqual(refresh.DEFAULTS["grok"]["model"], "grok-composer-2.5-fast")
+
     def test_claude_command_has_no_default_budget_cap(self) -> None:
         runner = load_module(RUNNER_SCRIPT, "run_peer_review")
         participant = runner.Participant(
@@ -187,6 +208,51 @@ class RunnerTests(unittest.TestCase):
 
         self.assertNotIn("--model", cmd)
 
+    def test_default_reviewer_roster_excludes_gemini_but_keeps_opt_in_alias(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+
+        self.assertEqual(runner.parse_reviewers("all"), ["claude", "codex", "grok"])
+        self.assertEqual(runner.parse_reviewers("all-with-gemini"), ["claude", "codex", "gemini", "grok"])
+
+    def test_review_scope_auto_fails_closed_to_strict(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+
+        policy = runner.resolve_review_policy("auto")
+
+        self.assertEqual(policy.requested_scope, "auto")
+        self.assertEqual(policy.effective_scope, "strict")
+        self.assertFalse(policy.web_search_requested)
+        self.assertIn("defaults to strict", policy.note)
+
+    def test_review_scope_manifest_discloses_policy(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+
+        policy = runner.resolve_review_policy("web-research")
+        manifest = runner.review_policy_manifest(policy)
+
+        self.assertEqual(manifest["requested_scope"], "web-research")
+        self.assertEqual(manifest["effective_scope"], "web-research")
+        self.assertTrue(manifest["web_search_requested"])
+        self.assertEqual(manifest["external_research"], "allowed_if_supported")
+
+    def test_apply_review_policy_records_per_participant_web_support(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+        participants = [
+            runner.Participant("claude", "Claude", "claude", "/bin/claude", "test", "m", "e", "s", "ready"),
+            runner.Participant("codex", "Codex", "codex", "/bin/codex", "test", "m", "e", "s", "ready"),
+            runner.Participant("grok", "Grok Build", "grok", "/bin/grok", "test", "m", "e", "s", "ready"),
+        ]
+
+        with mock.patch.dict("os.environ", {}, clear=True):
+            runner.apply_review_policy(participants, runner.resolve_review_policy("web-research"))
+
+        by_key = {item.key: item for item in participants}
+        self.assertEqual(by_key["grok"].review_scope_effective, "web-research")
+        self.assertTrue(by_key["grok"].web_search_enabled)
+        self.assertFalse(by_key["codex"].web_search_enabled)
+        self.assertFalse(by_key["claude"].tools_enabled)
+        self.assertIn("no verified", by_key["codex"].notes)
+
     def test_grok_command_allows_more_than_one_turn(self) -> None:
         runner = load_module(RUNNER_SCRIPT, "run_peer_review")
         with tempfile.TemporaryDirectory() as tmp:
@@ -206,7 +272,158 @@ class RunnerTests(unittest.TestCase):
 
         self.assertIn("--max-turns", cmd)
         turns = int(cmd[cmd.index("--max-turns") + 1])
-        self.assertGreaterEqual(turns, 4)
+        self.assertGreaterEqual(turns, 32)
+
+    def test_grok_command_disables_web_search_by_default(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+        with tempfile.TemporaryDirectory() as tmp:
+            participant = runner.Participant(
+                key="grok",
+                label="Grok Build",
+                cli="grok",
+                cli_path="/bin/grok",
+                cli_version="test",
+                requested_model="grok-build",
+                requested_effort="max; reasoning_effort=high",
+                effort_status="test",
+                status="ready",
+            )
+
+            cmd, _ = runner.command_for(participant, "prompt", Path(tmp))
+
+        self.assertIn("--disable-web-search", cmd)
+
+    def test_grok_web_research_scope_omits_disable_web_search_and_raises_default_turns(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+        with tempfile.TemporaryDirectory() as tmp:
+            participant = runner.Participant(
+                key="grok",
+                label="Grok Build",
+                cli="grok",
+                cli_path="/bin/grok",
+                cli_version="test",
+                requested_model="grok-build",
+                requested_effort="max; reasoning_effort=high",
+                effort_status="test",
+                status="ready",
+                review_scope_effective="web-research",
+                web_search_enabled=True,
+            )
+            with mock.patch.dict("os.environ", {}, clear=True):
+                cmd, _ = runner.command_for(participant, "prompt", Path(tmp))
+
+        self.assertNotIn("--disable-web-search", cmd)
+        self.assertGreater(int(cmd[cmd.index("--max-turns") + 1]), 32)
+
+    def test_grok_command_honors_explicit_turn_budget_override(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+        with tempfile.TemporaryDirectory() as tmp:
+            participant = runner.Participant(
+                key="grok",
+                label="Grok Build",
+                cli="grok",
+                cli_path="/bin/grok",
+                cli_version="test",
+                requested_model="grok-build",
+                requested_effort="max; reasoning_effort=high",
+                effort_status="test",
+                status="ready",
+            )
+            with mock.patch.dict("os.environ", {"PEER_REVIEW_GROK_MAX_TURNS": "8"}, clear=True):
+                cmd, _ = runner.command_for(participant, "prompt", Path(tmp))
+
+        self.assertEqual(cmd[cmd.index("--max-turns") + 1], "8")
+
+    def test_grok_command_disables_plan_mode_for_headless_review(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+        with tempfile.TemporaryDirectory() as tmp:
+            participant = runner.Participant(
+                key="grok",
+                label="Grok Build",
+                cli="grok",
+                cli_path="/bin/grok",
+                cli_version="test",
+                requested_model="grok-build",
+                requested_effort="max; reasoning_effort=high",
+                effort_status="test",
+                status="ready",
+            )
+
+            cmd, _ = runner.command_for(participant, "prompt", Path(tmp))
+
+        self.assertIn("--no-plan", cmd)
+        self.assertNotIn("--permission-mode", cmd)
+
+    def test_web_research_does_not_relax_codex_read_only_sandbox(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+        participant = runner.Participant(
+            key="codex",
+            label="Codex",
+            cli="codex",
+            cli_path="/bin/codex",
+            cli_version="test",
+            requested_model="gpt-5.5",
+            requested_effort="xhigh",
+            effort_status="test",
+            status="ready",
+            review_scope_effective="web-research",
+            web_search_enabled=False,
+        )
+
+        cmd, stdin_text = runner.command_for(participant, "prompt", Path("/tmp"))
+
+        self.assertEqual(stdin_text, "prompt")
+        self.assertIn("--sandbox", cmd)
+        self.assertEqual(cmd[cmd.index("--sandbox") + 1], "read-only")
+        self.assertNotIn("workspace-write", cmd)
+        self.assertNotIn("danger-full-access", cmd)
+
+    def test_build_prompt_strict_requires_supplied_context_only_and_evidence_basis(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+        args = runner.argparse.Namespace(
+            focus=[],
+            prompt_file=None,
+            project=None,
+            milestone="current milestone",
+            mode="Diff Critique",
+            review_scope="strict",
+        )
+
+        prompt = runner.build_prompt(args, Path("/tmp/repo"), runner.resolve_review_policy("strict"))
+
+        self.assertIn("Use only the supplied context", prompt)
+        self.assertIn("Do not use web search", prompt)
+        self.assertIn("Evidence basis", prompt)
+
+    def test_build_prompt_web_research_allows_external_sources_with_citations(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+        args = runner.argparse.Namespace(
+            focus=["current vendor/API facts"],
+            prompt_file=None,
+            project=None,
+            milestone="current milestone",
+            mode="Strategy Review",
+            review_scope="web-research",
+        )
+
+        prompt = runner.build_prompt(args, Path("/tmp/repo"), runner.resolve_review_policy("web-research"))
+
+        self.assertIn("external web/source research", prompt)
+        self.assertIn("Cite every external source", prompt)
+        self.assertIn("external-source-grounded", prompt)
+
+    def test_short_note_prefers_terminal_error_over_startup_warnings(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+        stderr = "\n".join(
+            [
+                "\x1b[2m2026-06-23T23:25:40Z\x1b[0m \x1b[33m WARN\x1b[0m plugin name collision resolved",
+                "\x1b[2m2026-06-23T23:26:14Z\x1b[0m \x1b[33m WARN\x1b[0m session registry update failed",
+                "Max turns reached",
+                "Error: max turns reached",
+            ]
+        )
+
+        self.assertEqual(runner.short_note(stderr), "Error: max turns reached")
 
     def test_run_exit_code_requires_all_reviewers_unless_partial_allowed(self) -> None:
         runner = load_module(RUNNER_SCRIPT, "run_peer_review")
@@ -268,6 +485,14 @@ class SkillDocumentationTests(unittest.TestCase):
 
         self.assertIn("display_name: \"ChatGPT Pro Peer Review\"", text)
         self.assertIn("$chatgpt-pro-peer-review", text)
+
+    def test_peer_review_docs_use_composer_25_fast_default(self) -> None:
+        skill_text = PEER_REVIEW_SKILL.read_text(encoding="utf-8")
+        readme_text = README.read_text(encoding="utf-8")
+
+        self.assertIn("grok-composer-2.5-fast", skill_text)
+        self.assertIn("PEER_REVIEW_GROK_MODEL=grok-composer-2.5-fast", skill_text)
+        self.assertIn("grok-composer-2.5-fast", readme_text)
 
 
 if __name__ == "__main__":
