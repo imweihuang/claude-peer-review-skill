@@ -59,13 +59,25 @@ Auto-select evidence scope from the user's request before running reviewers. Alw
 
 Force `strict` for security-boundary, secret, deploy, schema-migration, production-readiness, bug/regression, or PR/diff reviews unless the user explicitly asks for external research and the added risk is justified. For strategic/current-info questions, prefer `strategy-open` or `web-research` so independent reviewers can reduce Codex's single-curator blind spot. Label external findings separately from repo-grounded findings.
 
+## Tool Policy
+
+Humans do not need to specify tool flags. The agent infers tool policy from evidence scope and reports what it selected. Tool access is fail-closed.
+
+| Tool Policy | Applies To | Reviewer Tool Access |
+| --- | --- | --- |
+| `context-only` | `strict`, `broad-repo`, and fallback `auto` | curated context only; no web, no local repo browsing, no write/action tools |
+| `web-allowed` | `strategy-open`, `web-research` | web/source research only where a reviewer runtime has a verified safe toggle; no local repo browsing, no write/action tools |
+
+Never allow reviewer write/action tools. Do not let reviewers browse local files beyond the curated context bundle. Claude tools may be enabled only in `web-allowed` scope through an explicitly verified `PEER_REVIEW_CLAUDE_TOOLS` allowlist. Grok web search is enabled only in `web-allowed` scope. Codex/GPT remains read-only in an empty temporary cwd. Gemini remains sandboxed/plan-mode where supported.
+
 ## Workflow
 
 1. Define the review target.
-   - Identify project goal, milestone, review mode, evidence scope, review intensity, and focus areas.
+   - Identify project goal, milestone, review mode, evidence scope, review intensity, tool policy, and focus areas.
    - If the user does not specify reviewers, use the default roster: Claude, Codex/GPT, and Grok Build.
    - If the user requests a subset, pass it with `--reviewers claude`, `--reviewers gpt`, `--reviewers claude,gpt`, etc.
    - Select intensity yourself. Do not require the user to add flags. Use `--intensity planning` for task discovery and prioritization. Use `--intensity gate` for pre-merge/readiness reviews. Use `--intensity critical` for the critical triggers above.
+   - Select tool policy from review scope. Do not require the user to add tool flags.
 
 2. Curate context.
    - Include tracked docs, source files, configs, and tests that directly support the review.
@@ -124,7 +136,7 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.
    - Codex/GPT runs in a temporary empty cwd with read-only sandboxing and ephemeral mode.
    - Gemini runs with `--skip-trust`, plan approval mode, and a sandbox where supported.
    - Grok Build always runs with subagents disabled, interactive plan mode disabled, no tool allowlist, and an initialized empty temp git directory. In `strict` and `broad-repo`, web search is disabled and `PEER_REVIEW_GROK_MAX_TURNS` defaults to `32`; in `strategy-open` and `web-research`, the runner omits the web-disable flag and defaults Grok turns to `64` unless overridden.
-   - The manifest and summary disclose requested scope, effective scope, external research policy, and per-reviewer web/tool status. Some reviewers may remain repo-context-only even when external research is requested because their local CLI does not expose a verified safe web-search toggle.
+   - The manifest and summary disclose requested scope, effective scope, selected tool policy, external research policy, and per-reviewer web/tool status. Some reviewers may remain repo-context-only even when external research is requested because their local CLI does not expose a verified safe web-search toggle.
    - By default the run exits nonzero if any requested reviewer fails. Use `--allow-partial` only when a degraded council is acceptable.
 
 6. Synthesize without outsourcing judgment.
@@ -147,7 +159,7 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.
    - Keep unrelated refactors out.
 
 8. Report the outcome.
-   - Include selected review mode, evidence scope, review intensity, context selection, and the participant table from the runner.
+   - Include selected review mode, evidence scope, review intensity, tool policy, context selection, and the participant table from the runner.
    - Include what each model actually participated with: CLI version, model, effort, effort-status caveat, web-search status, and tool status.
    - Include strongest agreement, strongest disagreement, accepted/deferred/rejected findings, edits made, and verification results.
    - Separate repo-grounded findings from external-source-grounded or speculative findings.

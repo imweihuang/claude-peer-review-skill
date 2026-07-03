@@ -73,6 +73,7 @@ class Participant:
     review_scope_effective: str | None = None
     web_search_enabled: bool = False
     tools_enabled: bool = False
+    tool_allowlist: str | None = None
 
 
 @dataclass(frozen=True)
@@ -93,6 +94,15 @@ class ReviewIntensity:
     codex_effort: str
     grok_effort: str
     grok_reasoning_effort: str
+    note: str
+
+
+@dataclass(frozen=True)
+class ToolPolicy:
+    name: str
+    web_research_allowed: bool
+    local_repo_browsing_allowed: bool
+    write_action_tools_allowed: bool
     note: str
 
 
@@ -165,10 +175,18 @@ def main() -> int:
     review_intensity = resolve_review_intensity(args.intensity)
     participants = [preflight_participant(key, review_intensity) for key in reviewers]
     review_policy = resolve_review_policy(args.review_scope)
-    apply_review_policy(participants, review_policy)
+    tool_policy = resolve_tool_policy(review_policy)
+    apply_review_policy(participants, review_policy, tool_policy)
 
     if args.preflight or args.dry_run:
-        print_summary(participants, output_dir=None, dry_run=True, review_policy=review_policy, review_intensity=review_intensity)
+        print_summary(
+            participants,
+            output_dir=None,
+            dry_run=True,
+            review_policy=review_policy,
+            review_intensity=review_intensity,
+            tool_policy=tool_policy,
+        )
         return 0 if all(p.status == "ready" for p in participants) else 2
 
     if not args.paths:
@@ -189,6 +207,7 @@ def main() -> int:
         "mode": args.mode,
         "review_scope": review_policy_manifest(review_policy),
         "review_intensity": review_intensity_manifest(review_intensity),
+        "tool_policy": tool_policy_manifest(tool_policy),
         "project": args.project or root.name,
         "milestone": args.milestone,
         "reviewers_requested": reviewers,
@@ -199,7 +218,14 @@ def main() -> int:
     }
     (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
-    print_summary(results, output_dir=output_dir, dry_run=False, review_policy=review_policy, review_intensity=review_intensity)
+    print_summary(
+        results,
+        output_dir=output_dir,
+        dry_run=False,
+        review_policy=review_policy,
+        review_intensity=review_intensity,
+        tool_policy=tool_policy,
+    )
     return run_exit_code(results, args.allow_partial)
 
 
@@ -298,12 +324,40 @@ def review_intensity_manifest(intensity: ReviewIntensity) -> dict[str, object]:
     return asdict(intensity)
 
 
-def apply_review_policy(participants: list[Participant], policy: ReviewPolicy) -> None:
+def resolve_tool_policy(policy: ReviewPolicy) -> ToolPolicy:
+    if policy.web_search_requested:
+        return ToolPolicy(
+            name="web-allowed",
+            web_research_allowed=True,
+            local_repo_browsing_allowed=False,
+            write_action_tools_allowed=False,
+            note="external web/source research allowed only through verified reviewer runtime toggles; no local repo browsing or write/action tools",
+        )
+    return ToolPolicy(
+        name="context-only",
+        web_research_allowed=False,
+        local_repo_browsing_allowed=False,
+        write_action_tools_allowed=False,
+        note="reviewers may use only the curated context bundle; no web, local repo browsing, or write/action tools",
+    )
+
+
+def tool_policy_manifest(policy: ToolPolicy) -> dict[str, object]:
+    return asdict(policy)
+
+
+def apply_review_policy(participants: list[Participant], policy: ReviewPolicy, tool_policy: ToolPolicy | None = None) -> None:
+    effective_tool_policy = tool_policy or resolve_tool_policy(policy)
     for participant in participants:
         participant.review_scope_effective = policy.effective_scope
-        participant.web_search_enabled = policy.web_search_requested and participant.key == "grok"
-        participant.tools_enabled = bool(os.environ.get("PEER_REVIEW_CLAUDE_TOOLS", "")) if participant.key == "claude" else False
-        if not policy.web_search_requested:
+        participant.web_search_enabled = effective_tool_policy.web_research_allowed and participant.key == "grok"
+        participant.tools_enabled = False
+        participant.tool_allowlist = ""
+        if participant.key == "claude" and effective_tool_policy.web_research_allowed:
+            tools = os.environ.get("PEER_REVIEW_CLAUDE_TOOLS", "")
+            participant.tools_enabled = bool(tools)
+            participant.tool_allowlist = tools
+        if not effective_tool_policy.web_research_allowed:
             continue
         if participant.key == "grok":
             append_note(participant, "web search requested; Grok web-disable flag omitted for this scope")
@@ -677,7 +731,7 @@ def finish_participant_timing(participant: Participant, started_monotonic: float
 
 def command_for(participant: Participant, review_input: str, cwd: Path) -> tuple[list[str], str | None]:
     if participant.key == "claude":
-        tools = os.environ.get("PEER_REVIEW_CLAUDE_TOOLS", "")
+        tools = participant.tool_allowlist or ""
         cmd = [
             "claude",
             "-p",
@@ -838,6 +892,7 @@ def print_summary(
     dry_run: bool,
     review_policy: ReviewPolicy | None = None,
     review_intensity: ReviewIntensity | None = None,
+    tool_policy: ToolPolicy | None = None,
 ) -> None:
     title = "Peer Review Dry Run" if dry_run else "Peer Review Run"
     print(f"# {title}")
@@ -851,6 +906,8 @@ def print_summary(
         )
     if review_intensity:
         print(f"Review intensity: `{review_intensity.name}`; {review_intensity.note}")
+    if tool_policy:
+        print(f"Tool policy: `{tool_policy.name}`; {tool_policy.note}")
     print()
     print("| Reviewer | CLI version | Requested model | Requested effort | Effort status | Web search | Tools | Status |")
     print("| --- | --- | --- | --- | --- | --- | --- | --- |")

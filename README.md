@@ -135,6 +135,8 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.
 
 `--intensity` controls effort policy. Use `planning` for recursive queue discovery and task prioritization, `gate` for pre-merge/readiness checks, and `critical` for high-risk schema, security, deploy, live-data, API, provenance, point-in-time, or weak/conflicting verification decisions.
 
+Humans do not need to specify tool flags. Tool policy is inferred from `--review-scope`: `strict`, `broad-repo`, and fallback `auto` use `context-only`; `strategy-open` and `web-research` use `web-allowed`. `context-only` means curated context only. `web-allowed` permits web/source research only where a reviewer runtime exposes a verified safe toggle. Reviewer local repo browsing and write/action tools are never allowed.
+
 Run a subset:
 
 ```bash

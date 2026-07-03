@@ -288,6 +288,56 @@ class RunnerTests(unittest.TestCase):
         self.assertFalse(by_key["claude"].tools_enabled)
         self.assertIn("no verified", by_key["codex"].notes)
 
+    def test_context_only_tool_policy_ignores_claude_tool_env(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+        participant = runner.Participant("claude", "Claude", "claude", "/bin/claude", "test", "opus", "xhigh", "s", "ready")
+
+        with mock.patch.dict("os.environ", {"PEER_REVIEW_CLAUDE_TOOLS": "WebFetch"}, clear=True):
+            policy = runner.resolve_review_policy("strict")
+            tool_policy = runner.resolve_tool_policy(policy)
+            runner.apply_review_policy([participant], policy, tool_policy)
+            cmd, _ = runner.command_for(participant, "prompt", Path("/tmp"))
+
+        self.assertEqual(tool_policy.name, "context-only")
+        self.assertFalse(tool_policy.web_research_allowed)
+        self.assertFalse(tool_policy.write_action_tools_allowed)
+        self.assertFalse(participant.tools_enabled)
+        self.assertEqual(cmd[cmd.index("--tools") + 1], "")
+
+    def test_web_allowed_tool_policy_enables_only_verified_paths(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+        participants = [
+            runner.Participant("claude", "Claude", "claude", "/bin/claude", "test", "opus", "xhigh", "s", "ready"),
+            runner.Participant("codex", "Codex", "codex", "/bin/codex", "test", "gpt-5.5", "xhigh", "s", "ready"),
+            runner.Participant("grok", "Grok Build", "grok", "/bin/grok", "test", "grok-build", "max; reasoning_effort=high", "s", "ready"),
+        ]
+
+        with mock.patch.dict("os.environ", {"PEER_REVIEW_CLAUDE_TOOLS": "WebFetch"}, clear=True):
+            policy = runner.resolve_review_policy("web-research")
+            tool_policy = runner.resolve_tool_policy(policy)
+            runner.apply_review_policy(participants, policy, tool_policy)
+            claude_cmd, _ = runner.command_for(participants[0], "prompt", Path("/tmp"))
+
+        by_key = {item.key: item for item in participants}
+        self.assertEqual(tool_policy.name, "web-allowed")
+        self.assertTrue(tool_policy.web_research_allowed)
+        self.assertFalse(tool_policy.local_repo_browsing_allowed)
+        self.assertFalse(tool_policy.write_action_tools_allowed)
+        self.assertTrue(by_key["claude"].tools_enabled)
+        self.assertEqual(claude_cmd[claude_cmd.index("--tools") + 1], "WebFetch")
+        self.assertFalse(by_key["codex"].web_search_enabled)
+        self.assertTrue(by_key["grok"].web_search_enabled)
+
+    def test_tool_policy_manifest_discloses_fail_closed_rules(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+
+        manifest = runner.tool_policy_manifest(runner.resolve_tool_policy(runner.resolve_review_policy("strict")))
+
+        self.assertEqual(manifest["name"], "context-only")
+        self.assertFalse(manifest["web_research_allowed"])
+        self.assertFalse(manifest["local_repo_browsing_allowed"])
+        self.assertFalse(manifest["write_action_tools_allowed"])
+
     def test_grok_command_allows_more_than_one_turn(self) -> None:
         runner = load_module(RUNNER_SCRIPT, "run_peer_review")
         with tempfile.TemporaryDirectory() as tmp:
@@ -543,6 +593,16 @@ class SkillDocumentationTests(unittest.TestCase):
         self.assertIn("infer the review intensity", metadata_text)
         self.assertIn("default to gate", metadata_text)
         self.assertIn("Gemini opt-in", metadata_text)
+
+    def test_peer_review_docs_define_fail_closed_tool_policy(self) -> None:
+        skill_text = PEER_REVIEW_SKILL.read_text(encoding="utf-8")
+        readme_text = README.read_text(encoding="utf-8")
+
+        for text in (skill_text, readme_text):
+            self.assertIn("`context-only`", text)
+            self.assertIn("`web-allowed`", text)
+            self.assertIn("write/action tools", text)
+            self.assertIn("Humans do not need to specify tool flags", text)
 
 
 if __name__ == "__main__":
