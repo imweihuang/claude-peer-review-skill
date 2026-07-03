@@ -539,7 +539,9 @@ class SkillDocumentationTests(unittest.TestCase):
             self.assertIn("`gate`", text)
             self.assertIn("`critical`", text)
             self.assertIn("--intensity gate", text)
-        self.assertIn("gate-intensity", metadata_text)
+            self.assertIn("Humans do not need to specify", text)
+        self.assertIn("infer the review intensity", metadata_text)
+        self.assertIn("default to gate", metadata_text)
         self.assertIn("Gemini opt-in", metadata_text)
 
 

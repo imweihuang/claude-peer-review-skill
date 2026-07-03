@@ -21,7 +21,7 @@ Gemini remains supported but is opt-in. Use `--reviewers all-with-gemini` or inc
 
 If a CLI, model, auth state, or effort setting is unavailable, report it clearly. Do not silently downgrade or present Codex self-review as external peer review.
 
-Default review intensity is `gate`. Use lower intensity only through an explicit intensity policy, not as an unreported fallback.
+Humans do not need to specify an intensity flag. The agent must infer review intensity from the request and context, pass the matching `--intensity` value to the runner, and report what it selected. Default review intensity is `gate` when the target is ambiguous or the runner is called directly without a selected intensity. Use lower intensity only through the explicit policy below, not as an unreported fallback.
 
 | Intensity | Use For | Claude/Codex Effort | Grok Effort |
 | --- | --- | --- | --- |
@@ -65,7 +65,7 @@ Force `strict` for security-boundary, secret, deploy, schema-migration, producti
    - Identify project goal, milestone, review mode, evidence scope, review intensity, and focus areas.
    - If the user does not specify reviewers, use the default roster: Claude, Codex/GPT, and Grok Build.
    - If the user requests a subset, pass it with `--reviewers claude`, `--reviewers gpt`, `--reviewers claude,gpt`, etc.
-   - Use `--intensity planning` for task discovery and prioritization. Use `--intensity gate` for pre-merge/readiness reviews. Use `--intensity critical` for the critical triggers above.
+   - Select intensity yourself. Do not require the user to add flags. Use `--intensity planning` for task discovery and prioritization. Use `--intensity gate` for pre-merge/readiness reviews. Use `--intensity critical` for the critical triggers above.
 
 2. Curate context.
    - Include tracked docs, source files, configs, and tests that directly support the review.

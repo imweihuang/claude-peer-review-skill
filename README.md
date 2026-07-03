@@ -27,7 +27,7 @@ External reviewers propose candidates and critiques. Codex verifies them against
 
 ## Defaults
 
-Default intensity is `gate`.
+Humans do not need to specify `--intensity` when calling the skill. The skill infers the review intensity from the request, passes the matching flag to the runner, and reports what it selected. Default intensity is `gate` when the target is ambiguous or the runner is called directly without a selected intensity.
 
 | Reviewer | CLI | Gate/Critical model | Gate/Critical effort |
 | --- | --- | --- | --- |
