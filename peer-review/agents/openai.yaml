@@ -1,4 +1,4 @@
 interface:
   display_name: "Peer Review"
   short_description: "Run safe multi-model CLI peer reviews"
-  default_prompt: "Use $peer-review to run independent Claude, Codex/GPT, Gemini, and Grok peer reviews of this repository."
+  default_prompt: "Use $peer-review to run a gate-intensity independent Claude, Codex/GPT, and Grok Build peer review of this repository; keep Gemini opt-in unless I explicitly request it."

@@ -27,11 +27,21 @@ External reviewers propose candidates and critiques. Codex verifies them against
 
 ## Defaults
 
-| Reviewer | CLI | Default model | Default effort |
+Default intensity is `gate`.
+
+| Reviewer | CLI | Gate/Critical model | Gate/Critical effort |
 | --- | --- | --- | --- |
 | Claude | `claude` | Opus 4.8 via `opus` alias | `xhigh` |
 | Codex/GPT | `codex` | `gpt-5.5` | `xhigh` |
 | Grok Build | `grok` | `grok-composer-2.5-fast` | `max`; `reasoning_effort=high` |
+
+Intensity presets:
+
+| Intensity | Use For | Claude/Codex Effort |
+| --- | --- | --- |
+| `planning` | Queue discovery and task prioritization | `high` |
+| `gate` | Pre-merge, readiness, and normal blocking reviews | `xhigh` |
+| `critical` | Schema, security, deploy, live-data, API, provenance, point-in-time, or weak/conflicting verification | `xhigh` |
 
 Gemini remains supported but is opt-in through `--reviewers gemini` or `--reviewers all-with-gemini`.
 
@@ -114,6 +124,7 @@ Run a targeted review:
 python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.py" \
   --mode "Diff Critique" \
   --review-scope strict \
+  --intensity gate \
   --milestone "current milestone" \
   --focus "correctness bugs and behavioral regressions" \
   --focus "missing tests and security boundaries" \
@@ -121,6 +132,8 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.
 ```
 
 `--review-scope` controls evidence policy. Use `strict` for implementation, launch, schema, security, and diff reviews; `broad-repo` for internal architecture reviews needing wider curated context; `strategy-open` or `web-research` for open-ended/current-info questions where external source discovery may help. The runner's default `auto` fails closed to `strict`; the skill should pass an explicit scope after reading the user's request.
+
+`--intensity` controls effort policy. Use `planning` for recursive queue discovery and task prioritization, `gate` for pre-merge/readiness checks, and `critical` for high-risk schema, security, deploy, live-data, API, provenance, point-in-time, or weak/conflicting verification decisions.
 
 Run a subset:
 

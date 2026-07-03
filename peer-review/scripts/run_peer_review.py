@@ -34,6 +34,7 @@ DEFAULT_GROK_MAX_TURNS = "32"
 DEFAULT_GROK_WEB_MAX_TURNS = "64"
 REVIEW_SCOPES = ("auto", "strict", "broad-repo", "strategy-open", "web-research")
 WEB_RESEARCH_SCOPES = {"strategy-open", "web-research"}
+REVIEW_INTENSITIES = ("planning", "gate", "critical")
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 NOTE_PRIORITY_NEEDLES = (
     "error:",
@@ -85,6 +86,16 @@ class ReviewPolicy:
     note: str
 
 
+@dataclass(frozen=True)
+class ReviewIntensity:
+    name: str
+    claude_effort: str
+    codex_effort: str
+    grok_effort: str
+    grok_reasoning_effort: str
+    note: str
+
+
 ParticipantRunner = Callable[[Participant, str, Path, int], Participant]
 
 
@@ -108,6 +119,15 @@ def main() -> int:
             "Evidence policy: auto fails closed to strict in the runner; the skill should pass an explicit "
             "scope after reading the user's request. strict and broad-repo disable external research; "
             "strategy-open and web-research allow external research only where a reviewer runtime supports it."
+        ),
+    )
+    parser.add_argument(
+        "--intensity",
+        default=os.environ.get("PEER_REVIEW_INTENSITY", "gate"),
+        choices=REVIEW_INTENSITIES,
+        help=(
+            "Review effort preset. planning uses high effort for task discovery; gate preserves xhigh defaults "
+            "for pre-merge/readiness review; critical is xhigh for consequential schema/security/deploy/live-data decisions."
         ),
     )
     parser.add_argument("--project", default=None, help="Project name for the review prompt.")
@@ -142,12 +162,13 @@ def main() -> int:
 
     root = Path(args.root).resolve()
     reviewers = parse_reviewers(args.reviewers)
-    participants = [preflight_participant(key) for key in reviewers]
+    review_intensity = resolve_review_intensity(args.intensity)
+    participants = [preflight_participant(key, review_intensity) for key in reviewers]
     review_policy = resolve_review_policy(args.review_scope)
     apply_review_policy(participants, review_policy)
 
     if args.preflight or args.dry_run:
-        print_summary(participants, output_dir=None, dry_run=True, review_policy=review_policy)
+        print_summary(participants, output_dir=None, dry_run=True, review_policy=review_policy, review_intensity=review_intensity)
         return 0 if all(p.status == "ready" for p in participants) else 2
 
     if not args.paths:
@@ -167,6 +188,7 @@ def main() -> int:
         "root": str(root),
         "mode": args.mode,
         "review_scope": review_policy_manifest(review_policy),
+        "review_intensity": review_intensity_manifest(review_intensity),
         "project": args.project or root.name,
         "milestone": args.milestone,
         "reviewers_requested": reviewers,
@@ -177,7 +199,7 @@ def main() -> int:
     }
     (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
-    print_summary(results, output_dir=output_dir, dry_run=False, review_policy=review_policy)
+    print_summary(results, output_dir=output_dir, dry_run=False, review_policy=review_policy, review_intensity=review_intensity)
     return run_exit_code(results, args.allow_partial)
 
 
@@ -241,6 +263,41 @@ def review_policy_manifest(policy: ReviewPolicy) -> dict[str, object]:
     }
 
 
+def resolve_review_intensity(raw: str) -> ReviewIntensity:
+    if raw not in REVIEW_INTENSITIES:
+        raise argparse.ArgumentTypeError(f"unknown review intensity {raw!r}; expected one of {', '.join(REVIEW_INTENSITIES)}")
+    if raw == "planning":
+        return ReviewIntensity(
+            name="planning",
+            claude_effort="high",
+            codex_effort="high",
+            grok_effort="max",
+            grok_reasoning_effort="high",
+            note="planning intensity for task discovery and prioritization; lower than gate for Claude/Codex",
+        )
+    if raw == "gate":
+        return ReviewIntensity(
+            name="gate",
+            claude_effort="xhigh",
+            codex_effort="xhigh",
+            grok_effort="max",
+            grok_reasoning_effort="high",
+            note="gate intensity for pre-merge, readiness, and normal blocking reviews",
+        )
+    return ReviewIntensity(
+        name="critical",
+        claude_effort="xhigh",
+        codex_effort="xhigh",
+        grok_effort="max",
+        grok_reasoning_effort="high",
+        note="critical intensity for consequential schema, security, deploy, live-data, API, provenance, or point-in-time decisions",
+    )
+
+
+def review_intensity_manifest(intensity: ReviewIntensity) -> dict[str, object]:
+    return asdict(intensity)
+
+
 def apply_review_policy(participants: list[Participant], policy: ReviewPolicy) -> None:
     for participant in participants:
         participant.review_scope_effective = policy.effective_scope
@@ -283,24 +340,27 @@ def positive_int_env(name: str, default: int) -> int:
         raise SystemExit(f"{name}: {exc}") from exc
 
 
-def preflight_participant(key: str) -> Participant:
+def preflight_participant(key: str, intensity: ReviewIntensity | None = None) -> Participant:
+    selected_intensity = intensity or resolve_review_intensity("gate")
     if key == "claude":
+        effort = os.environ.get("PEER_REVIEW_CLAUDE_EFFORT", selected_intensity.claude_effort)
         return make_participant(
             key=key,
             label="Claude",
             cli="claude",
             model=os.environ.get("PEER_REVIEW_CLAUDE_MODEL", "opus"),
-            effort=os.environ.get("PEER_REVIEW_CLAUDE_EFFORT", "xhigh"),
-            effort_status="requested with --effort xhigh for Opus 4.8",
+            effort=effort,
+            effort_status=f"{selected_intensity.name} intensity requested with --effort {effort} for Opus 4.8",
         )
     if key == "codex":
+        effort = os.environ.get("PEER_REVIEW_CODEX_EFFORT", os.environ.get("PEER_REVIEW_GPT_EFFORT", selected_intensity.codex_effort))
         participant = make_participant(
             key=key,
             label="Codex/GPT",
             cli="codex",
             model=os.environ.get("PEER_REVIEW_CODEX_MODEL", os.environ.get("PEER_REVIEW_GPT_MODEL", "gpt-5.5")),
-            effort=os.environ.get("PEER_REVIEW_CODEX_EFFORT", os.environ.get("PEER_REVIEW_GPT_EFFORT", "xhigh")),
-            effort_status="requested with model_reasoning_effort",
+            effort=effort,
+            effort_status=f"{selected_intensity.name} intensity requested with model_reasoning_effort={effort}",
         )
         if participant.status == "ready" and not codex_model_supports(participant.requested_model, participant.requested_effort):
             participant.status = "model_unavailable"
@@ -316,15 +376,15 @@ def preflight_participant(key: str) -> Participant:
             effort_status="Gemini CLI default model; no thinking-effort flag in --help",
         )
     if key == "grok":
-        effort = os.environ.get("PEER_REVIEW_GROK_EFFORT", "max")
-        reasoning = os.environ.get("PEER_REVIEW_GROK_REASONING_EFFORT", "high")
+        effort = os.environ.get("PEER_REVIEW_GROK_EFFORT", selected_intensity.grok_effort)
+        reasoning = os.environ.get("PEER_REVIEW_GROK_REASONING_EFFORT", selected_intensity.grok_reasoning_effort)
         participant = make_participant(
             key=key,
             label="Grok Build",
             cli="grok",
             model=os.environ.get("PEER_REVIEW_GROK_MODEL", "grok-composer-2.5-fast"),
             effort=f"{effort}; reasoning_effort={reasoning}",
-            effort_status="requested with --effort and --reasoning-effort",
+            effort_status=f"{selected_intensity.name} intensity requested with --effort and --reasoning-effort",
         )
         if participant.status == "ready":
             model_status = grok_model_status(participant.requested_model)
@@ -676,8 +736,7 @@ def command_for(participant: Participant, review_input: str, cwd: Path) -> tuple
     if participant.key == "grok":
         prompt_file = cwd / "prompt-and-context.md"
         prompt_file.write_text(review_input, encoding="utf-8")
-        effort = os.environ.get("PEER_REVIEW_GROK_EFFORT", "max")
-        reasoning = os.environ.get("PEER_REVIEW_GROK_REASONING_EFFORT", "high")
+        effort, reasoning = parse_grok_effort(participant.requested_effort)
         default_turns = DEFAULT_GROK_WEB_MAX_TURNS if participant.web_search_enabled else DEFAULT_GROK_MAX_TURNS
         max_turns = os.environ.get("PEER_REVIEW_GROK_MAX_TURNS", default_turns)
         subprocess.run(["git", "init"], cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
@@ -707,6 +766,20 @@ def command_for(participant: Participant, review_input: str, cwd: Path) -> tuple
         ]
         return (cmd, None)
     raise AssertionError(participant.key)
+
+
+def parse_grok_effort(requested_effort: str) -> tuple[str, str]:
+    effort = "max"
+    reasoning = "high"
+    for part in requested_effort.split(";"):
+        item = part.strip()
+        if not item:
+            continue
+        if item.startswith("reasoning_effort="):
+            reasoning = item.split("=", 1)[1].strip() or reasoning
+        elif "=" not in item:
+            effort = item
+    return effort, reasoning
 
 
 def is_auth_prompt(text: str) -> bool:
@@ -764,6 +837,7 @@ def print_summary(
     output_dir: Path | None,
     dry_run: bool,
     review_policy: ReviewPolicy | None = None,
+    review_intensity: ReviewIntensity | None = None,
 ) -> None:
     title = "Peer Review Dry Run" if dry_run else "Peer Review Run"
     print(f"# {title}")
@@ -775,6 +849,8 @@ def print_summary(
             f"Review scope: requested `{review_policy.requested_scope}`, effective `{review_policy.effective_scope}`; "
             f"external research `{review_policy.external_research}`"
         )
+    if review_intensity:
+        print(f"Review intensity: `{review_intensity.name}`; {review_intensity.note}")
     print()
     print("| Reviewer | CLI version | Requested model | Requested effort | Effort status | Web search | Tools | Status |")
     print("| --- | --- | --- | --- | --- | --- | --- | --- |")

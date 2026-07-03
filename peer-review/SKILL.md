@@ -9,7 +9,7 @@ description: Use when the user asks for peer review, external review, model coun
 
 Use this skill to run independent external CLI reviewers and then have Codex validate the findings. Treat the reviewers as strong second, third, and fourth eyes, not authorities.
 
-Default reviewer roster:
+Default reviewer roster at `gate` intensity:
 
 | Reviewer | CLI | Default model | Default effort |
 | --- | --- | --- | --- |
@@ -20,6 +20,16 @@ Default reviewer roster:
 Gemini remains supported but is opt-in. Use `--reviewers all-with-gemini` or include `gemini` explicitly when Gemini's local CLI behavior is acceptable for the task.
 
 If a CLI, model, auth state, or effort setting is unavailable, report it clearly. Do not silently downgrade or present Codex self-review as external peer review.
+
+Default review intensity is `gate`. Use lower intensity only through an explicit intensity policy, not as an unreported fallback.
+
+| Intensity | Use For | Claude/Codex Effort | Grok Effort |
+| --- | --- | --- | --- |
+| `planning` | Queue discovery, task prioritization, low-risk strategy brainstorms | `high` | `max`; `reasoning_effort=high` |
+| `gate` | Pre-merge diff critique, launch/readiness checks, normal blocking reviews | `xhigh` | `max`; `reasoning_effort=high` |
+| `critical` | Schema, security, auth, privacy, deploy, live-data, API contract, provenance, point-in-time, weak/conflicting verification | `xhigh` | `max`; `reasoning_effort=high` |
+
+Planning intensity is an approved mode for recursive task discovery and prioritization. It is not a downgrade. Gate and critical reviews remain xhigh for Claude and Codex/GPT.
 
 ## Review Modes
 
@@ -52,9 +62,10 @@ Force `strict` for security-boundary, secret, deploy, schema-migration, producti
 ## Workflow
 
 1. Define the review target.
-   - Identify project goal, milestone, review mode, evidence scope, and focus areas.
+   - Identify project goal, milestone, review mode, evidence scope, review intensity, and focus areas.
    - If the user does not specify reviewers, use the default roster: Claude, Codex/GPT, and Grok Build.
    - If the user requests a subset, pass it with `--reviewers claude`, `--reviewers gpt`, `--reviewers claude,gpt`, etc.
+   - Use `--intensity planning` for task discovery and prioritization. Use `--intensity gate` for pre-merge/readiness reviews. Use `--intensity critical` for the critical triggers above.
 
 2. Curate context.
    - Include tracked docs, source files, configs, and tests that directly support the review.
@@ -77,7 +88,7 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/build_review_con
 python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.py" --preflight
 ```
 
-   - The response must include all requested participants, CLI versions, requested models, requested efforts, effort-status caveats, and unavailable/auth-failed reviewers.
+   - The response must include all requested participants, selected intensity, CLI versions, requested models, requested efforts, effort-status caveats, and unavailable/auth-failed reviewers.
    - Grok may be installed but unauthenticated. Report that as unavailable for the run until `grok login` or supported xAI auth is configured.
    - Gemini CLI currently exposes `--model` but no clear thinking-effort flag in `gemini --help`; by default use the local CLI default model and report Gemini effort as `not-cli-exposed` unless the installed CLI proves otherwise.
    - Preflight proves local CLI/model metadata, not a full paid review. A run may still fail on provider-specific runtime requirements; report those failures plainly.
@@ -100,6 +111,7 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/refresh_peer_rev
 python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.py" \
   --mode "Diff Critique" \
   --review-scope strict \
+  --intensity gate \
   --milestone "current milestone" \
   --focus "correctness bugs and behavioral regressions" \
   --focus "missing tests and security boundaries" \
@@ -135,7 +147,7 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.
    - Keep unrelated refactors out.
 
 8. Report the outcome.
-   - Include selected review mode, evidence scope, context selection, and the participant table from the runner.
+   - Include selected review mode, evidence scope, review intensity, context selection, and the participant table from the runner.
    - Include what each model actually participated with: CLI version, model, effort, effort-status caveat, web-search status, and tool status.
    - Include strongest agreement, strongest disagreement, accepted/deferred/rejected findings, edits made, and verification results.
    - Separate repo-grounded findings from external-source-grounded or speculative findings.
@@ -147,6 +159,7 @@ Use these env vars for one run:
 
 ```bash
 PEER_REVIEW_REVIEWERS=claude,codex,grok
+PEER_REVIEW_INTENSITY=gate
 PEER_REVIEW_CLAUDE_MODEL=opus
 PEER_REVIEW_CLAUDE_EFFORT=xhigh
 PEER_REVIEW_CODEX_MODEL=gpt-5.5
@@ -161,7 +174,7 @@ PEER_REVIEW_JOBS=4
 
 Set `PEER_REVIEW_CLAUDE_MAX_BUDGET_USD` only when a Claude run needs an explicit `--max-budget-usd` cap; there is no default budget cap.
 
-Do not use a lower model or lower effort unless the user explicitly approves the fallback.
+Do not use a lower model or lower effort than the selected intensity unless the user explicitly approves the fallback. `planning` intensity is an approved lower-intensity mode for planning reviews, not a fallback.
 
 ## Context Selection Guide
 

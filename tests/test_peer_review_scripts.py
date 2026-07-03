@@ -18,6 +18,7 @@ REFRESH_SCRIPT = REPO_ROOT / "peer-review" / "scripts" / "refresh_peer_review_cl
 CHATGPT_PRO_SKILL = REPO_ROOT / "chatgpt-pro-peer-review" / "SKILL.md"
 CHATGPT_PRO_METADATA = REPO_ROOT / "chatgpt-pro-peer-review" / "agents" / "openai.yaml"
 PEER_REVIEW_SKILL = REPO_ROOT / "peer-review" / "SKILL.md"
+PEER_REVIEW_METADATA = REPO_ROOT / "peer-review" / "agents" / "openai.yaml"
 README = REPO_ROOT / "README.md"
 
 
@@ -102,6 +103,40 @@ class ContextBuilderTests(unittest.TestCase):
 
 
 class RunnerTests(unittest.TestCase):
+    def test_planning_intensity_lowers_claude_and_codex_to_high(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+        intensity = runner.resolve_review_intensity("planning")
+        with (
+            mock.patch.dict("os.environ", {}, clear=True),
+            mock.patch.object(runner.shutil, "which", return_value="/bin/reviewer"),
+            mock.patch.object(runner, "get_version", return_value="test"),
+            mock.patch.object(runner, "codex_model_supports", return_value=True),
+        ):
+            claude = runner.preflight_participant("claude", intensity)
+            codex = runner.preflight_participant("codex", intensity)
+
+        self.assertEqual(claude.requested_effort, "high")
+        self.assertEqual(codex.requested_effort, "high")
+        self.assertIn("planning", claude.effort_status)
+        self.assertIn("planning", codex.effort_status)
+
+    def test_gate_intensity_keeps_claude_and_codex_xhigh(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+        intensity = runner.resolve_review_intensity("gate")
+        with (
+            mock.patch.dict("os.environ", {}, clear=True),
+            mock.patch.object(runner.shutil, "which", return_value="/bin/reviewer"),
+            mock.patch.object(runner, "get_version", return_value="test"),
+            mock.patch.object(runner, "codex_model_supports", return_value=True),
+        ):
+            claude = runner.preflight_participant("claude", intensity)
+            codex = runner.preflight_participant("codex", intensity)
+
+        self.assertEqual(claude.requested_effort, "xhigh")
+        self.assertEqual(codex.requested_effort, "xhigh")
+        self.assertIn("gate", claude.effort_status)
+        self.assertIn("gate", codex.effort_status)
+
     def test_claude_defaults_use_opus_48_xhigh_effort(self) -> None:
         runner = load_module(RUNNER_SCRIPT, "run_peer_review")
         with (
@@ -493,6 +528,19 @@ class SkillDocumentationTests(unittest.TestCase):
         self.assertIn("grok-composer-2.5-fast", skill_text)
         self.assertIn("PEER_REVIEW_GROK_MODEL=grok-composer-2.5-fast", skill_text)
         self.assertIn("grok-composer-2.5-fast", readme_text)
+
+    def test_peer_review_docs_define_intensity_policy(self) -> None:
+        skill_text = PEER_REVIEW_SKILL.read_text(encoding="utf-8")
+        readme_text = README.read_text(encoding="utf-8")
+        metadata_text = PEER_REVIEW_METADATA.read_text(encoding="utf-8")
+
+        for text in (skill_text, readme_text):
+            self.assertIn("`planning`", text)
+            self.assertIn("`gate`", text)
+            self.assertIn("`critical`", text)
+            self.assertIn("--intensity gate", text)
+        self.assertIn("gate-intensity", metadata_text)
+        self.assertIn("Gemini opt-in", metadata_text)
 
 
 if __name__ == "__main__":
