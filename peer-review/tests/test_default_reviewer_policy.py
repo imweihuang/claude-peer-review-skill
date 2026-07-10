@@ -37,7 +37,9 @@ class DefaultReviewerPolicyTest(unittest.TestCase):
     def test_skill_and_shared_canon_document_manual_only_codex_review(self) -> None:
         self.assertIn("Grok Build remains supported only as explicit opt-in", SKILL_PATH.read_text())
         self.assertIn("`all` is a legacy alias for the Claude default", SKILL_PATH.read_text())
-        self.assertIn("Codex lead → external-model review is manual-only", CANON_PATH.read_text())
+        canon_text = CANON_PATH.read_text()
+        self.assertIn("Cross-model review — manual-only, every lead", canon_text)
+        self.assertIn("NO review pass fires automatically", canon_text)
 
     def test_unspecified_intensity_defaults_to_manual_planning_high(self) -> None:
         intensity = RUNNER.resolve_review_intensity(None)

@@ -143,7 +143,7 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.
 
    - The runner keeps outputs separate and does not show one model's answer to another.
    - The runner runs independent reviewers in parallel by default, up to `--jobs 4` or `PEER_REVIEW_JOBS`. Use `--jobs 1` for sequential debugging.
-   - Claude runs with no tools in `context-only` scope. In `web-allowed` scope it receives exactly `WebSearch,WebFetch` by default, with no session persistence; `PEER_REVIEW_CLAUDE_TOOLS` may only narrow or disable that allowlist. Fable 5 runs first at the selected intensity effort; Opus 4.8 is retried at that same resolved effort only for an unavailable, overloaded, rate-limited, quota-limited, or timed-out primary.
+   - Claude runs with no tools in `context-only` scope. In `web-allowed` scope it receives exactly `WebSearch,WebFetch` by default, with no session persistence; `PEER_REVIEW_CLAUDE_TOOLS` may only narrow or disable that allowlist. Fable 5 runs at the explicitly selected intensity and effort. There is no fallback unless the user explicitly requested one and the authorized fallback is configured for that run.
    - Codex/GPT runs in a temporary empty cwd with read-only sandboxing and ephemeral mode.
    - Gemini runs with `--skip-trust`, plan approval mode, and a sandbox where supported.
    - Grok Build always runs with subagents disabled, interactive plan mode disabled, no tool allowlist, and an initialized empty temp git directory. In `strict` and `broad-repo`, web search is disabled and `PEER_REVIEW_GROK_MAX_TURNS` defaults to `32`; in `strategy-open` and `web-research`, the runner omits the web-disable flag and defaults Grok turns to `64` unless overridden.

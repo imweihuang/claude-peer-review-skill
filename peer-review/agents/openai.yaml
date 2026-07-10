@@ -1,4 +1,4 @@
 interface:
   display_name: "Peer Review"
-  short_description: "Run safe multi-model CLI peer reviews"
-  default_prompt: "Use $peer-review to infer the review intensity from my request, default to gate if ambiguous, and run independent Claude and Grok Build peer review; keep Codex/GPT and Gemini opt-in unless I explicitly request them."
+  short_description: "Manually run a safe external-model peer review"
+  default_prompt: "Use $peer-review only when I explicitly request external review. Default to Claude Fable 5 at planning/high with no fallback; add reviewers, gate/critical intensity, higher effort, web access, or a fallback only when I explicitly request them."

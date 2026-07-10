@@ -4,7 +4,9 @@ This repository contains Codex skills for safe external software peer review.
 
 Primary skill:
 
-- `peer-review`: run independent Claude and Grok Build CLI peer reviews by default, with Codex/GPT and Gemini opt-in, then have Codex reconcile and validate the findings.
+- `peer-review`: manually run Claude Fable 5 at planning/high by default, with
+  no fallback; additional reviewers, higher effort, and gate modes are explicit
+  opt-ins, after which Codex validates the findings.
 
 Compatibility entry points:
 
@@ -27,14 +29,20 @@ External reviewers propose candidates and critiques. Codex verifies them against
 
 ## Defaults
 
-Humans do not need to specify `--intensity` when calling the skill. The skill infers the review intensity from the request, passes the matching flag to the runner, and reports what it selected. Default intensity is `gate` when the target is ambiguous or the runner is called directly without a selected intensity.
+The skill runs only after an explicit request for external or second-model
+review. Humans do not need to specify `--intensity` for a normal manual call:
+the default is `planning`, and the runner reports what it selected.
 
-| Reviewer | CLI | Gate/Critical model | Gate/Critical effort |
+| Reviewer | CLI | Default model | Default effort |
 | --- | --- | --- | --- |
-| Claude | `claude` | Fable 5 via `claude-fable-5` | `xhigh` |
-| Grok Build | `grok` | `grok-4.5` | `reasoning_effort=high` |
+| Claude | `claude` | Fable 5 via `claude-fable-5` | `high` |
 
-If Fable 5 is unavailable, overloaded, rate- or quota-limited, or times out, the runner retries Claude once with Opus 4.8 via the `opus` alias at the same resolved effort and records which model completed the review. Codex/GPT remains available through `--reviewers codex` or `--reviewers gpt`, but it is not part of the default Codex-led gate. Grok 4.5 supports `low`, `medium`, and `high` reasoning effort; `high` is the highest supported value.
+There is no automatic fallback. If Fable 5 is unavailable, overloaded, rate-
+or quota-limited, or times out, the run reports that result and stops. Opus or
+another fallback runs only when the user explicitly requests it. Codex/GPT,
+Gemini, and Grok Build are also explicit opt-ins. Grok 4.5 (`grok-4.5`)
+supports `low`, `medium`, and `high` reasoning effort; `high` is the highest
+supported value.
 
 Intensity presets:
 
@@ -44,7 +52,10 @@ Intensity presets:
 | `gate` | Pre-merge, readiness, and normal blocking reviews | `xhigh` | `xhigh` |
 | `critical` | Schema, security, deploy, live-data, API, provenance, point-in-time, or weak/conflicting verification | `xhigh` | `xhigh` |
 
-Gemini remains supported but is opt-in through `--reviewers gemini` or `--reviewers all-with-gemini`.
+Gate and critical modes remain available only through explicit requests; they
+are never inferred from risk, readiness, commit, push, PR, CI, or merge intent.
+Gemini remains supported but is opt-in through `--reviewers gemini` or
+`--reviewers all-with-gemini`.
 
 The runner does not silently downgrade. If a CLI, model, auth state, or effort setting is unavailable, the report says so clearly.
 
@@ -82,10 +93,10 @@ Restart Codex so the new skill metadata is discovered.
 
 ## Usage
 
-Default all-reviewer council:
+Manual default review:
 
 ```text
-Use $peer-review to run a production-readiness review of this repository.
+Use $peer-review to ask Fable 5 for an independent review of this repository.
 ```
 
 Specific presets:
