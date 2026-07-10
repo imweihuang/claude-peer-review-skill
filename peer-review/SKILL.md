@@ -9,24 +9,27 @@ description: Use when the user asks for peer review, external review, model coun
 
 Use this skill to run independent external CLI reviewers and then have Codex validate the findings. Treat the reviewers as strong second, third, and fourth eyes, not authorities.
 
-Default reviewer roster at `gate` intensity is cross-model for a Codex lead:
+Advisory judgment and a blocking gate are separate products. A blocking gate must review the final candidate diff and its verification evidence. Earlier planning, strategy, or architecture advice does not satisfy that gate.
+
+The default reviewer at `gate` intensity is cross-family for a Codex lead:
 
 | Reviewer | CLI | Default model | Default effort |
 | --- | --- | --- | --- |
 | Claude | `claude` | Fable 5 via `claude-fable-5` | `xhigh` |
-| Grok Build | `grok` | `grok-4.5` | `reasoning_effort=high` |
 
 If Fable 5 is unavailable or overloaded, the runner retries Claude once with Opus 4.8 via the `opus` alias at `xhigh` and records which model completed the review.
 
-Grok 4.5 supports `low`, `medium`, and `high` reasoning effort. `xhigh` is not a valid Grok 4.5 reasoning effort, so use `high` as the highest supported setting.
+Grok Build remains supported only as explicit opt-in. When requested, Grok 4.5 uses `reasoning_effort=high`; `xhigh` is not a valid Grok 4.5 reasoning effort.
 
-Codex/GPT remains supported only as explicit opt-in for user-requested GPT opinions, non-Codex-led contexts, or broad advisory comparison. It must not count as the cross-model gate for Codex-led work. Gemini remains supported but is opt-in. Use `--reviewers all-with-gemini` to add Gemini to the cross-model default roster, or include `gemini` explicitly when Gemini's local CLI behavior is acceptable for the task.
+Codex/GPT remains supported only as explicit opt-in for user-requested GPT opinions, non-Codex-led contexts, or broad advisory comparison. It must not count as the cross-model gate for Codex-led work. Gemini and Grok are also explicit opt-ins. Use `--reviewers all-with-gemini` to add Gemini to the Claude default, or include `gemini` or `grok` explicitly when that reviewer is wanted.
+
+`all` is a legacy alias for the Claude default, not a request for every installed reviewer. Name every additional reviewer explicitly.
 
 If a CLI, model, auth state, or effort setting is unavailable, report it clearly. Do not silently downgrade or present Codex self-review as external peer review.
 
 Humans do not need to specify an intensity flag. The agent must infer review intensity from the request and context, pass the matching `--intensity` value to the runner, and report what it selected. Default review intensity is `gate` when the target is ambiguous or the runner is called directly without a selected intensity. Use lower intensity only through the explicit policy below, not as an unreported fallback.
 
-| Intensity | Use For | Claude Primary Effort | Explicit Codex/GPT Effort | Grok Effort |
+| Intensity | Use For | Claude Primary Effort | Explicit Codex/GPT Effort | Explicit Grok Effort |
 | --- | --- | --- | --- | --- |
 | `planning` | Queue discovery, task prioritization, low-risk strategy brainstorms | `xhigh` | `high` | `reasoning_effort=high` |
 | `gate` | Pre-merge diff critique, launch/readiness checks, normal blocking reviews | `xhigh` | `xhigh` | `reasoning_effort=high` |
@@ -81,8 +84,8 @@ Treat anti-exfiltration in `web-allowed` scope as prompt-enforced, not a mechani
 
 1. Define the review target.
    - Identify project goal, milestone, review mode, evidence scope, review intensity, tool policy, and focus areas.
-   - If the user does not specify reviewers, use the default cross-model roster: Claude and Grok Build.
-   - If the user requests a subset, pass it with `--reviewers claude`, `--reviewers gpt`, `--reviewers claude,gpt`, etc. Single-model asks ("ask Claude for a review", "what does GPT think") are subsets of this skill; the retired claude-/gpt-/claude-gpt-peer-review entry points are archived (2026-07-06). Browser-based GPT-5.5 Pro consultation remains its own skill: `chatgpt-pro-peer-review`.
+   - If the user does not specify reviewers, use Claude only. Grok, Codex/GPT, and Gemini require explicit selection.
+   - If the user requests another reviewer or a council, pass it with `--reviewers grok`, `--reviewers claude,grok`, `--reviewers gpt`, `--reviewers claude,gpt`, etc. Single-model asks ("ask Claude for a review", "what does GPT think") are subsets of this skill; the retired claude-/gpt-/claude-gpt-peer-review entry points are archived (2026-07-06). Browser-based GPT-5.5 Pro consultation remains its own skill: `chatgpt-pro-peer-review`.
    - Select intensity yourself. Do not require the user to add flags. Use `--intensity planning` for task discovery and prioritization. Use `--intensity gate` for pre-merge/readiness reviews. Use `--intensity critical` for the critical triggers above.
    - Select tool policy from review scope. Do not require the user to add tool flags.
 
@@ -177,7 +180,7 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.
 Use these env vars for one run:
 
 ```bash
-PEER_REVIEW_REVIEWERS=claude,grok
+PEER_REVIEW_REVIEWERS=claude
 PEER_REVIEW_INTENSITY=gate
 PEER_REVIEW_CLAUDE_MODEL=claude-fable-5
 PEER_REVIEW_CLAUDE_EFFORT=xhigh
@@ -194,6 +197,8 @@ PEER_REVIEW_JOBS=4
 ```
 
 Include `codex`/`gpt` in `PEER_REVIEW_REVIEWERS` only for explicit advisory GPT opinions or non-Codex-led review contexts. It never satisfies a required Codex-led cross-model gate.
+
+Include `grok` only when the user explicitly requests Grok or explicitly approves a multi-reviewer council that names Grok.
 
 Set `PEER_REVIEW_CLAUDE_MAX_BUDGET_USD` only when a Claude run needs an explicit `--max-budget-usd` cap; there is no default budget cap.
 

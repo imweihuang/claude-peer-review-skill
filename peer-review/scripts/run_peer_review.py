@@ -19,9 +19,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-DEFAULT_REVIEWERS = ("claude", "grok")
+DEFAULT_REVIEWERS = ("claude",)
 SUPPORTED_REVIEWERS = ("claude", "codex", "gemini", "grok")
-DEFAULT_REVIEWERS_WITH_GEMINI = ("claude", "gemini", "grok")
+DEFAULT_REVIEWERS_WITH_GEMINI = ("claude", "gemini")
 REVIEWER_ALIASES = {
     "all": DEFAULT_REVIEWERS,
     "all-with-gemini": DEFAULT_REVIEWERS_WITH_GEMINI,
@@ -128,7 +128,7 @@ def main() -> int:
     parser.add_argument(
         "--reviewers",
         default=os.environ.get("PEER_REVIEW_REVIEWERS", "all"),
-        help="Comma-separated reviewers: all, claude, codex/gpt, gemini, grok.",
+        help="Comma-separated reviewers. The legacy all alias means the Claude default; name codex/gpt, gemini, or grok explicitly.",
     )
     parser.add_argument("--mode", default="Architecture Review", help="Review mode label.")
     parser.add_argument(
