@@ -34,13 +34,13 @@ Humans do not need to specify `--intensity` when calling the skill. The skill in
 | Claude | `claude` | Fable 5 via `claude-fable-5` | `xhigh` |
 | Grok Build | `grok` | `grok-4.5` | `reasoning_effort=high` |
 
-If Fable 5 is unavailable or overloaded, the runner retries Claude once with Opus 4.8 via the `opus` alias at `xhigh` and records which model completed the review. Codex/GPT remains available through `--reviewers codex` or `--reviewers gpt`, but it is not part of the default Codex-led gate. Grok 4.5 supports `low`, `medium`, and `high` reasoning effort; `high` is the highest supported value.
+If Fable 5 is unavailable, overloaded, rate- or quota-limited, or times out, the runner retries Claude once with Opus 4.8 via the `opus` alias at the same resolved effort and records which model completed the review. Codex/GPT remains available through `--reviewers codex` or `--reviewers gpt`, but it is not part of the default Codex-led gate. Grok 4.5 supports `low`, `medium`, and `high` reasoning effort; `high` is the highest supported value.
 
 Intensity presets:
 
 | Intensity | Use For | Claude Primary Effort | Explicit Codex/GPT Effort |
 | --- | --- | --- | --- |
-| `planning` | Queue discovery and task prioritization | `xhigh` | `high` |
+| `planning` | Queue discovery and task prioritization | `high` | `high` |
 | `gate` | Pre-merge, readiness, and normal blocking reviews | `xhigh` | `xhigh` |
 | `critical` | Schema, security, deploy, live-data, API, provenance, point-in-time, or weak/conflicting verification | `xhigh` | `xhigh` |
 

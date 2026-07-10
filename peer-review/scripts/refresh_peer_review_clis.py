@@ -14,9 +14,9 @@ from datetime import datetime, timezone
 DEFAULTS = {
     "claude": {
         "model": "claude-fable-5",
-        "effort": "xhigh",
+        "effort": "high",
         "fallback_model": "opus",
-        "fallback_effort": "xhigh",
+        "fallback_effort": "high",
     },
     "codex": {"model": "gpt-5.5", "effort": "xhigh"},
     "gemini": {"model": "cli-default", "effort": "not-cli-exposed"},

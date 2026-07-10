@@ -103,7 +103,7 @@ class ContextBuilderTests(unittest.TestCase):
 
 
 class RunnerTests(unittest.TestCase):
-    def test_planning_intensity_keeps_fable_xhigh_and_lowers_codex_to_high(self) -> None:
+    def test_planning_intensity_uses_high_for_fable_and_codex(self) -> None:
         runner = load_module(RUNNER_SCRIPT, "run_peer_review")
         intensity = runner.resolve_review_intensity("planning")
         with (
@@ -115,14 +115,68 @@ class RunnerTests(unittest.TestCase):
             claude = runner.preflight_participant("claude", intensity)
             codex = runner.preflight_participant("codex", intensity)
 
-        self.assertEqual(claude.requested_effort, "xhigh")
+        self.assertEqual(claude.requested_effort, "high")
+        self.assertEqual(claude.fallback_effort, "high")
         self.assertEqual(codex.requested_effort, "high")
         self.assertIn("planning", claude.effort_status)
         self.assertIn("planning", codex.effort_status)
         self.assertEqual(
             intensity.note,
-            "planning intensity for task discovery and prioritization; Claude remains xhigh while explicit Codex/GPT uses high",
+            "planning intensity for advisory task discovery and prioritization; Claude/Fable and explicit Codex/GPT use high",
         )
+
+    def test_planning_fable_ignores_lower_effort_override(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+        intensity = runner.resolve_review_intensity("planning")
+        with (
+            mock.patch.dict("os.environ", {"PEER_REVIEW_CLAUDE_EFFORT": "low"}, clear=True),
+            mock.patch.object(runner.shutil, "which", return_value="/bin/claude"),
+            mock.patch.object(runner, "get_version", return_value="test"),
+        ):
+            participant = runner.preflight_participant("claude", intensity)
+
+        self.assertEqual(participant.requested_effort, "high")
+        self.assertEqual(participant.fallback_effort, "high")
+        self.assertIn("ignored effort override low", participant.effort_status)
+
+    def test_planning_fable_honors_xhigh_override_and_fallback(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+        intensity = runner.resolve_review_intensity("planning")
+        with (
+            mock.patch.dict("os.environ", {"PEER_REVIEW_CLAUDE_EFFORT": "xhigh"}, clear=True),
+            mock.patch.object(runner.shutil, "which", return_value="/bin/claude"),
+            mock.patch.object(runner, "get_version", return_value="test"),
+        ):
+            participant = runner.preflight_participant("claude", intensity)
+
+        self.assertEqual(participant.requested_effort, "xhigh")
+        self.assertEqual(participant.fallback_effort, "xhigh")
+
+    def test_planning_fable_honors_max_override_and_fallback(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+        intensity = runner.resolve_review_intensity("planning")
+        with (
+            mock.patch.dict("os.environ", {"PEER_REVIEW_CLAUDE_EFFORT": "max"}, clear=True),
+            mock.patch.object(runner.shutil, "which", return_value="/bin/claude"),
+            mock.patch.object(runner, "get_version", return_value="test"),
+        ):
+            participant = runner.preflight_participant("claude", intensity)
+
+        self.assertEqual(participant.requested_effort, "max")
+        self.assertEqual(participant.fallback_effort, "max")
+
+    def test_custom_claude_primary_fallback_defaults_to_gate_effort(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+        intensity = runner.resolve_review_intensity("gate")
+        with (
+            mock.patch.dict("os.environ", {"PEER_REVIEW_CLAUDE_MODEL": "opus"}, clear=True),
+            mock.patch.object(runner.shutil, "which", return_value="/bin/claude"),
+            mock.patch.object(runner, "get_version", return_value="test"),
+        ):
+            participant = runner.preflight_participant("claude", intensity)
+
+        self.assertEqual(participant.requested_effort, "xhigh")
+        self.assertEqual(participant.fallback_effort, "xhigh")
 
     def test_gate_intensity_uses_fable_and_codex_xhigh(self) -> None:
         runner = load_module(RUNNER_SCRIPT, "run_peer_review")
@@ -157,18 +211,22 @@ class RunnerTests(unittest.TestCase):
         self.assertIn("Fable 5", participant.effort_status)
         self.assertIn("Opus 4.8", participant.effort_status)
 
-    def test_refresh_defaults_use_fable_5_xhigh_with_opus_48_xhigh_backup(self) -> None:
+    def test_refresh_defaults_use_fable_5_high_with_matching_opus_backup(self) -> None:
         refresh = load_module(REFRESH_SCRIPT, "refresh_peer_review_clis")
 
         self.assertEqual(refresh.DEFAULTS["claude"]["model"], "claude-fable-5")
-        self.assertEqual(refresh.DEFAULTS["claude"]["effort"], "xhigh")
+        self.assertEqual(refresh.DEFAULTS["claude"]["effort"], "high")
         self.assertEqual(refresh.DEFAULTS["claude"]["fallback_model"], "opus")
-        self.assertEqual(refresh.DEFAULTS["claude"]["fallback_effort"], "xhigh")
+        self.assertEqual(refresh.DEFAULTS["claude"]["fallback_effort"], "high")
 
     def test_claude_fallback_can_be_disabled_without_misreporting_preflight(self) -> None:
         runner = load_module(RUNNER_SCRIPT, "run_peer_review")
         with (
-            mock.patch.dict("os.environ", {"PEER_REVIEW_CLAUDE_FALLBACK_MODEL": ""}, clear=True),
+            mock.patch.dict(
+                "os.environ",
+                {"PEER_REVIEW_CLAUDE_MODEL": "opus", "PEER_REVIEW_CLAUDE_FALLBACK_MODEL": ""},
+                clear=True,
+            ),
             mock.patch.object(runner.shutil, "which", return_value="/bin/claude"),
             mock.patch.object(runner, "get_version", return_value="test"),
         ):
@@ -383,11 +441,11 @@ class RunnerTests(unittest.TestCase):
 
         self.assertNotIn("--model", cmd)
 
-    def test_default_reviewer_roster_excludes_gemini_but_keeps_opt_in_alias(self) -> None:
+    def test_default_reviewer_roster_keeps_grok_opt_in(self) -> None:
         runner = load_module(RUNNER_SCRIPT, "run_peer_review")
 
-        self.assertEqual(runner.parse_reviewers("all"), ["claude", "grok"])
-        self.assertEqual(runner.parse_reviewers("all-with-gemini"), ["claude", "gemini", "grok"])
+        self.assertEqual(runner.parse_reviewers("all"), ["claude"])
+        self.assertEqual(runner.parse_reviewers("all-with-gemini"), ["claude", "gemini"])
 
     def test_review_scope_auto_fails_closed_to_strict(self) -> None:
         runner = load_module(RUNNER_SCRIPT, "run_peer_review")

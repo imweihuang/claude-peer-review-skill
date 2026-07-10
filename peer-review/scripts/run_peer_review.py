@@ -34,10 +34,11 @@ REVIEWER_ALIASES = {
 DEFAULT_GROK_MAX_TURNS = "32"
 DEFAULT_GROK_WEB_MAX_TURNS = "64"
 DEFAULT_CLAUDE_MODEL = "claude-fable-5"
-DEFAULT_CLAUDE_EFFORT = "xhigh"
+DEFAULT_CLAUDE_EFFORT = "high"
 DEFAULT_CLAUDE_FALLBACK_MODEL = "opus"
-DEFAULT_CLAUDE_FALLBACK_EFFORT = "xhigh"
+DEFAULT_CLAUDE_FALLBACK_EFFORT = "high"
 DEFAULT_CLAUDE_WEB_TOOLS = ("WebSearch", "WebFetch")
+CLAUDE_EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
 REVIEW_SCOPES = ("auto", "strict", "broad-repo", "strategy-open", "web-research")
 WEB_RESEARCH_SCOPES = {"strategy-open", "web-research"}
 REVIEW_INTENSITIES = ("planning", "gate", "critical")
@@ -308,19 +309,19 @@ def resolve_review_intensity(raw: str) -> ReviewIntensity:
             claude_effort=DEFAULT_CLAUDE_EFFORT,
             codex_effort="high",
             grok_reasoning_effort="high",
-            note="planning intensity for task discovery and prioritization; Claude remains xhigh while explicit Codex/GPT uses high",
+            note="planning intensity for advisory task discovery and prioritization; Claude/Fable and explicit Codex/GPT use high",
         )
     if raw == "gate":
         return ReviewIntensity(
             name="gate",
-            claude_effort=DEFAULT_CLAUDE_EFFORT,
+            claude_effort="xhigh",
             codex_effort="xhigh",
             grok_reasoning_effort="high",
             note="gate intensity for pre-merge, readiness, and normal blocking reviews",
         )
     return ReviewIntensity(
         name="critical",
-        claude_effort=DEFAULT_CLAUDE_EFFORT,
+        claude_effort="xhigh",
         codex_effort="xhigh",
         grok_reasoning_effort="high",
         note="critical intensity for consequential schema, security, deploy, live-data, API, provenance, or point-in-time decisions",
@@ -415,14 +416,39 @@ def positive_int_env(name: str, default: int) -> int:
         raise SystemExit(f"{name}: {exc}") from exc
 
 
+def effort_at_least(base: str, requested: str | None) -> str:
+    if requested not in CLAUDE_EFFORT_LEVELS:
+        return base
+    if CLAUDE_EFFORT_LEVELS.index(requested) < CLAUDE_EFFORT_LEVELS.index(base):
+        return base
+    return requested
+
+
 def preflight_participant(key: str, intensity: ReviewIntensity | None = None) -> Participant:
     selected_intensity = intensity or resolve_review_intensity("gate")
     if key == "claude":
         model = os.environ.get("PEER_REVIEW_CLAUDE_MODEL", DEFAULT_CLAUDE_MODEL)
-        effort = os.environ.get("PEER_REVIEW_CLAUDE_EFFORT", selected_intensity.claude_effort)
-        fallback_model = os.environ.get("PEER_REVIEW_CLAUDE_FALLBACK_MODEL", DEFAULT_CLAUDE_FALLBACK_MODEL).strip() or None
-        fallback_effort = os.environ.get("PEER_REVIEW_CLAUDE_FALLBACK_EFFORT", DEFAULT_CLAUDE_FALLBACK_EFFORT).strip() or None
-        primary_label = "Fable 5" if model == DEFAULT_CLAUDE_MODEL else model
+        fable_primary = is_fable_model(model)
+        override_note = ""
+        if fable_primary:
+            requested_effort = os.environ.get("PEER_REVIEW_CLAUDE_EFFORT")
+            effort = effort_at_least(
+                selected_intensity.claude_effort,
+                requested_effort,
+            )
+            if requested_effort and requested_effort != effort:
+                override_note = f"; ignored effort override {requested_effort}; floor is {effort}"
+            fallback_model = DEFAULT_CLAUDE_FALLBACK_MODEL
+            fallback_effort = effort
+        else:
+            effort = os.environ.get("PEER_REVIEW_CLAUDE_EFFORT", selected_intensity.claude_effort)
+            fallback_model = os.environ.get(
+                "PEER_REVIEW_CLAUDE_FALLBACK_MODEL", DEFAULT_CLAUDE_FALLBACK_MODEL
+            ).strip() or None
+            fallback_effort = os.environ.get(
+                "PEER_REVIEW_CLAUDE_FALLBACK_EFFORT", effort
+            ).strip() or None
+        primary_label = "Fable 5" if fable_primary else model
         fallback_status = (
             f"Opus 4.8 fallback uses --effort {fallback_effort}"
             if fallback_model == DEFAULT_CLAUDE_FALLBACK_MODEL and fallback_effort
@@ -438,7 +464,7 @@ def preflight_participant(key: str, intensity: ReviewIntensity | None = None) ->
             effort=effort,
             effort_status=(
                 f"{selected_intensity.name} intensity requested with {primary_label} --effort {effort}; "
-                f"{fallback_status}"
+                f"{fallback_status}{override_note}"
             ),
             fallback_model=fallback_model,
             fallback_effort=fallback_effort,
@@ -730,58 +756,56 @@ def run_participant(participant: Participant, review_input: str, output_dir: Pat
         participant.command = shell_join(cmd)
         participant.output_file = str(out_file)
         participant.stderr_file = str(err_file)
-        result = subprocess.run(
-            cmd,
-            input=stdin_text,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            cwd=cwd,
-            timeout=timeout_seconds,
-            check=False,
-        )
-        primary_stdout = result.stdout or ""
-        primary_stderr = result.stderr or ""
-        primary_combined = f"{primary_stdout}\n{primary_stderr}"
-        if (
+        has_claude_fallback = bool(
             participant.key == "claude"
-            and result.returncode != 0
-            and should_use_claude_fallback(primary_combined)
             and participant.fallback_model
             and participant.fallback_effort
-        ):
-            elapsed_seconds = time.monotonic() - started_monotonic
-            remaining_timeout = max(1, int(timeout_seconds - elapsed_seconds))
-            fallback_cmd, fallback_stdin = claude_command_for(
-                participant,
-                review_input,
-                model=participant.fallback_model,
-                effort=participant.fallback_effort,
-            )
-            participant.command = f"{participant.command}; fallback: {shell_join(fallback_cmd)}"
+        )
+        primary_timeout = max(1, timeout_seconds // 2) if has_claude_fallback else timeout_seconds
+        fallback_timeout = max(1, timeout_seconds - primary_timeout)
+        try:
             result = subprocess.run(
-                fallback_cmd,
-                input=fallback_stdin,
+                cmd,
+                input=stdin_text,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 cwd=cwd,
-                timeout=remaining_timeout,
+                timeout=primary_timeout,
                 check=False,
             )
-            participant.used_fallback = True
-            fallback_note = (
-                f"primary {participant.requested_model}/{participant.requested_effort} unavailable or overloaded; "
-                f"used fallback {participant.fallback_model}/{participant.fallback_effort}"
+        except subprocess.TimeoutExpired as exc:
+            if not has_claude_fallback:
+                raise
+            primary_stderr = timeout_stream_text(exc.stderr)
+            result = run_claude_fallback(
+                participant,
+                review_input,
+                cwd=cwd,
+                timeout_seconds=fallback_timeout,
+                primary_stderr=primary_stderr,
+                reason="timed out",
             )
-            append_note(participant, fallback_note)
-            result.stderr = (
-                f"[primary {participant.requested_model}/{participant.requested_effort}]\n{primary_stderr}\n"
-                f"[fallback {participant.fallback_model}/{participant.fallback_effort}]\n{result.stderr or ''}"
-            )
+        else:
+            primary_stdout = result.stdout or ""
+            primary_stderr = result.stderr or ""
+            primary_combined = f"{primary_stdout}\n{primary_stderr}"
+            if (
+                has_claude_fallback
+                and result.returncode != 0
+                and should_use_claude_fallback(primary_combined)
+            ):
+                result = run_claude_fallback(
+                    participant,
+                    review_input,
+                    cwd=cwd,
+                    timeout_seconds=fallback_timeout,
+                    primary_stderr=primary_stderr,
+                    reason="unavailable, overloaded, or rate-limited",
+                )
     except subprocess.TimeoutExpired as exc:
         participant.status = "timeout"
-        participant.notes = f"timed out after {timeout_seconds}s"
+        append_note(participant, f"timed out after {timeout_seconds}s")
         out_file.write_text(timeout_stream_text(exc.stdout), encoding="utf-8")
         err_file.write_text(timeout_stream_text(exc.stderr), encoding="utf-8")
         return finish_participant_timing(participant, started_monotonic)
@@ -816,6 +840,46 @@ def run_participant(participant: Participant, review_input: str, output_dir: Pat
             participant.completed_model = participant.requested_model
             participant.completed_effort = participant.requested_effort
     return finish_participant_timing(participant, started_monotonic)
+
+
+def run_claude_fallback(
+    participant: Participant,
+    review_input: str,
+    cwd: Path,
+    timeout_seconds: int,
+    primary_stderr: str,
+    *,
+    reason: str,
+) -> subprocess.CompletedProcess[str]:
+    assert participant.fallback_model and participant.fallback_effort
+    fallback_cmd, fallback_stdin = claude_command_for(
+        participant,
+        review_input,
+        model=participant.fallback_model,
+        effort=participant.fallback_effort,
+    )
+    participant.command = f"{participant.command}; fallback: {shell_join(fallback_cmd)}"
+    participant.used_fallback = True
+    append_note(
+        participant,
+        f"primary {participant.requested_model}/{participant.requested_effort} {reason}; "
+        f"used fallback {participant.fallback_model}/{participant.fallback_effort}",
+    )
+    result = subprocess.run(
+        fallback_cmd,
+        input=fallback_stdin,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=cwd,
+        timeout=timeout_seconds,
+        check=False,
+    )
+    result.stderr = (
+        f"[primary {participant.requested_model}/{participant.requested_effort}]\n{primary_stderr}\n"
+        f"[fallback {participant.fallback_model}/{participant.fallback_effort}]\n{result.stderr or ''}"
+    )
+    return result
 
 
 def finish_participant_timing(participant: Participant, started_monotonic: float) -> Participant:
@@ -955,6 +1019,10 @@ def is_model_unavailable(text: str) -> bool:
     return "modelnotfound" in lowered or "requested entity was not found" in lowered
 
 
+def is_fable_model(model: str) -> bool:
+    return "fable" in model.lower()
+
+
 def should_use_claude_fallback(text: str) -> bool:
     lowered = text.lower()
     overload_needles = (
@@ -962,6 +1030,12 @@ def should_use_claude_fallback(text: str) -> bool:
         "overloaded_error",
         "model is currently unavailable",
         "model is temporarily unavailable",
+        "rate limit",
+        "rate_limit",
+        "quota",
+        "http 429",
+        "status code 429",
+        "too many requests",
     )
     return is_model_unavailable(text) or any(needle in lowered for needle in overload_needles)
 

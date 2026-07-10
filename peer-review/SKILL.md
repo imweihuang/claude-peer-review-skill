@@ -17,7 +17,7 @@ The default reviewer at `gate` intensity is cross-family for a Codex lead:
 | --- | --- | --- | --- |
 | Claude | `claude` | Fable 5 via `claude-fable-5` | `xhigh` |
 
-If Fable 5 is unavailable or overloaded, the runner retries Claude once with Opus 4.8 via the `opus` alias at `xhigh` and records which model completed the review.
+Every Fable 5 invocation has one mandatory availability backup: if a Fable model or alias is not found, overloaded, rate- or quota-limited, or times out, the runner retries Claude once with Opus 4.8 via the `opus` alias at the same resolved effort and records which model completed the review. The runner reserves half of the review timeout for the backup. Do not silently disable or replace this fallback.
 
 Grok Build remains supported only as explicit opt-in. When requested, Grok 4.5 uses `reasoning_effort=high`; `xhigh` is not a valid Grok 4.5 reasoning effort.
 
@@ -31,11 +31,11 @@ Humans do not need to specify an intensity flag. The agent must infer review int
 
 | Intensity | Use For | Claude Primary Effort | Explicit Codex/GPT Effort | Explicit Grok Effort |
 | --- | --- | --- | --- | --- |
-| `planning` | Queue discovery, task prioritization, low-risk strategy brainstorms | `xhigh` | `high` | `reasoning_effort=high` |
+| `planning` | Queue discovery, task prioritization, low-risk strategy brainstorms | `high` | `high` | `reasoning_effort=high` |
 | `gate` | Pre-merge diff critique, launch/readiness checks, normal blocking reviews | `xhigh` | `xhigh` | `reasoning_effort=high` |
 | `critical` | Schema, security, auth, privacy, deploy, live-data, API contract, provenance, point-in-time, weak/conflicting verification | `xhigh` | `xhigh` | `reasoning_effort=high` |
 
-Planning intensity is an approved mode for recursive task discovery and prioritization. It is not a downgrade. Claude uses Fable 5 at `xhigh` for all intensities, with Opus 4.8 at `xhigh` only as its availability fallback. Gate and critical reviews remain `xhigh` for Codex/GPT when GPT/Codex is explicitly requested.
+Planning intensity is the advisory tier for recursive task discovery and prioritization. Claude/Fable and its Opus fallback use `high`; gate and critical calls use `xhigh`. An explicit `xhigh` or `max` override may raise planning, while lower or invalid ambient overrides cannot lower the resolved tier. Gate and critical reviews remain `xhigh` for Codex/GPT when GPT/Codex is explicitly requested.
 
 ## Review Modes
 
@@ -142,7 +142,7 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.
 
    - The runner keeps outputs separate and does not show one model's answer to another.
    - The runner runs independent reviewers in parallel by default, up to `--jobs 4` or `PEER_REVIEW_JOBS`. Use `--jobs 1` for sequential debugging.
-   - Claude runs with no tools in `context-only` scope. In `web-allowed` scope it receives exactly `WebSearch,WebFetch` by default, with no session persistence; `PEER_REVIEW_CLAUDE_TOOLS` may only narrow or disable that allowlist. Fable 5 runs first at `xhigh`; Opus 4.8 is retried at `xhigh` only for an unavailable or overloaded primary.
+   - Claude runs with no tools in `context-only` scope. In `web-allowed` scope it receives exactly `WebSearch,WebFetch` by default, with no session persistence; `PEER_REVIEW_CLAUDE_TOOLS` may only narrow or disable that allowlist. Fable 5 runs first at the selected intensity effort; Opus 4.8 is retried at that same resolved effort only for an unavailable, overloaded, rate-limited, quota-limited, or timed-out primary.
    - Codex/GPT runs in a temporary empty cwd with read-only sandboxing and ephemeral mode.
    - Gemini runs with `--skip-trust`, plan approval mode, and a sandbox where supported.
    - Grok Build always runs with subagents disabled, interactive plan mode disabled, no tool allowlist, and an initialized empty temp git directory. In `strict` and `broad-repo`, web search is disabled and `PEER_REVIEW_GROK_MAX_TURNS` defaults to `32`; in `strategy-open` and `web-research`, the runner omits the web-disable flag and defaults Grok turns to `64` unless overridden.
@@ -202,11 +202,11 @@ Include `grok` only when the user explicitly requests Grok or explicitly approve
 
 Set `PEER_REVIEW_CLAUDE_MAX_BUDGET_USD` only when a Claude run needs an explicit `--max-budget-usd` cap; there is no default budget cap.
 
-Set `PEER_REVIEW_CLAUDE_FALLBACK_MODEL` to an empty value to disable the automatic Claude backup for one run.
+For a non-Fable custom Claude primary only, set `PEER_REVIEW_CLAUDE_FALLBACK_MODEL` to an empty value to disable the automatic Claude backup for one run. Fable 5 always retains the mandatory Opus 4.8 backup at the resolved effort.
 
 In `web-allowed` scope, omit `PEER_REVIEW_CLAUDE_TOOLS` to use the default `WebSearch,WebFetch` allowlist. Set it to `WebSearch`, `WebFetch`, or an empty value only; unsupported names disable all Claude tools for the run.
 
-Do not use a lower model or lower effort than the selected intensity unless the user explicitly approves the fallback. The documented Opus 4.8/`xhigh` Claude backup is part of the default policy, while `planning` remains an approved lower-intensity mode for Codex/GPT rather than a fallback.
+Do not use a lower model or lower effort than the selected intensity. The documented Opus 4.8 backup inherits Fable's resolved effort; `planning` is the approved `high` advisory tier, while gate and critical remain `xhigh`.
 
 ## Context Selection Guide
 
