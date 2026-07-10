@@ -144,11 +144,10 @@ def main() -> int:
     )
     parser.add_argument(
         "--intensity",
-        default=os.environ.get("PEER_REVIEW_INTENSITY", "gate"),
+        default=os.environ.get("PEER_REVIEW_INTENSITY", "planning"),
         choices=REVIEW_INTENSITIES,
         help=(
-            "Review effort preset. planning uses high effort for task discovery; gate preserves xhigh defaults "
-            "for pre-merge/readiness review; critical is xhigh for consequential schema/security/deploy/live-data decisions."
+            "Review effort preset. Manual reviews default to planning/high; gate and critical are explicit xhigh modes."
         ),
     )
     parser.add_argument("--project", default=None, help="Project name for the review prompt.")
@@ -300,7 +299,8 @@ def review_policy_manifest(policy: ReviewPolicy) -> dict[str, object]:
     }
 
 
-def resolve_review_intensity(raw: str) -> ReviewIntensity:
+def resolve_review_intensity(raw: str | None) -> ReviewIntensity:
+    raw = raw or "planning"
     if raw not in REVIEW_INTENSITIES:
         raise argparse.ArgumentTypeError(f"unknown review intensity {raw!r}; expected one of {', '.join(REVIEW_INTENSITIES)}")
     if raw == "planning":
@@ -425,7 +425,7 @@ def effort_at_least(base: str, requested: str | None) -> str:
 
 
 def preflight_participant(key: str, intensity: ReviewIntensity | None = None) -> Participant:
-    selected_intensity = intensity or resolve_review_intensity("gate")
+    selected_intensity = intensity or resolve_review_intensity(None)
     if key == "claude":
         model = os.environ.get("PEER_REVIEW_CLAUDE_MODEL", DEFAULT_CLAUDE_MODEL)
         fable_primary = is_fable_model(model)
@@ -438,16 +438,20 @@ def preflight_participant(key: str, intensity: ReviewIntensity | None = None) ->
             )
             if requested_effort and requested_effort != effort:
                 override_note = f"; ignored effort override {requested_effort}; floor is {effort}"
-            fallback_model = DEFAULT_CLAUDE_FALLBACK_MODEL
-            fallback_effort = effort
+            fallback_model = os.environ.get("PEER_REVIEW_CLAUDE_FALLBACK_MODEL", "").strip() or None
+            fallback_effort = (
+                os.environ.get("PEER_REVIEW_CLAUDE_FALLBACK_EFFORT", effort).strip() or None
+                if fallback_model
+                else None
+            )
         else:
             effort = os.environ.get("PEER_REVIEW_CLAUDE_EFFORT", selected_intensity.claude_effort)
-            fallback_model = os.environ.get(
-                "PEER_REVIEW_CLAUDE_FALLBACK_MODEL", DEFAULT_CLAUDE_FALLBACK_MODEL
-            ).strip() or None
-            fallback_effort = os.environ.get(
-                "PEER_REVIEW_CLAUDE_FALLBACK_EFFORT", effort
-            ).strip() or None
+            fallback_model = os.environ.get("PEER_REVIEW_CLAUDE_FALLBACK_MODEL", "").strip() or None
+            fallback_effort = (
+                os.environ.get("PEER_REVIEW_CLAUDE_FALLBACK_EFFORT", effort).strip() or None
+                if fallback_model
+                else None
+            )
         primary_label = "Fable 5" if fable_primary else model
         fallback_status = (
             f"Opus 4.8 fallback uses --effort {fallback_effort}"

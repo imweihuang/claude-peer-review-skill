@@ -116,7 +116,7 @@ class RunnerTests(unittest.TestCase):
             codex = runner.preflight_participant("codex", intensity)
 
         self.assertEqual(claude.requested_effort, "high")
-        self.assertEqual(claude.fallback_effort, "high")
+        self.assertIsNone(claude.fallback_effort)
         self.assertEqual(codex.requested_effort, "high")
         self.assertIn("planning", claude.effort_status)
         self.assertIn("planning", codex.effort_status)
@@ -136,10 +136,10 @@ class RunnerTests(unittest.TestCase):
             participant = runner.preflight_participant("claude", intensity)
 
         self.assertEqual(participant.requested_effort, "high")
-        self.assertEqual(participant.fallback_effort, "high")
+        self.assertIsNone(participant.fallback_effort)
         self.assertIn("ignored effort override low", participant.effort_status)
 
-    def test_planning_fable_honors_xhigh_override_and_fallback(self) -> None:
+    def test_planning_fable_honors_xhigh_override_without_fallback(self) -> None:
         runner = load_module(RUNNER_SCRIPT, "run_peer_review")
         intensity = runner.resolve_review_intensity("planning")
         with (
@@ -150,9 +150,9 @@ class RunnerTests(unittest.TestCase):
             participant = runner.preflight_participant("claude", intensity)
 
         self.assertEqual(participant.requested_effort, "xhigh")
-        self.assertEqual(participant.fallback_effort, "xhigh")
+        self.assertIsNone(participant.fallback_effort)
 
-    def test_planning_fable_honors_max_override_and_fallback(self) -> None:
+    def test_planning_fable_honors_max_override_without_fallback(self) -> None:
         runner = load_module(RUNNER_SCRIPT, "run_peer_review")
         intensity = runner.resolve_review_intensity("planning")
         with (
@@ -163,9 +163,9 @@ class RunnerTests(unittest.TestCase):
             participant = runner.preflight_participant("claude", intensity)
 
         self.assertEqual(participant.requested_effort, "max")
-        self.assertEqual(participant.fallback_effort, "max")
+        self.assertIsNone(participant.fallback_effort)
 
-    def test_custom_claude_primary_fallback_defaults_to_gate_effort(self) -> None:
+    def test_custom_claude_primary_has_no_automatic_fallback(self) -> None:
         runner = load_module(RUNNER_SCRIPT, "run_peer_review")
         intensity = runner.resolve_review_intensity("gate")
         with (
@@ -176,7 +176,7 @@ class RunnerTests(unittest.TestCase):
             participant = runner.preflight_participant("claude", intensity)
 
         self.assertEqual(participant.requested_effort, "xhigh")
-        self.assertEqual(participant.fallback_effort, "xhigh")
+        self.assertIsNone(participant.fallback_effort)
 
     def test_gate_intensity_uses_fable_and_codex_xhigh(self) -> None:
         runner = load_module(RUNNER_SCRIPT, "run_peer_review")
@@ -195,7 +195,7 @@ class RunnerTests(unittest.TestCase):
         self.assertIn("gate", claude.effort_status)
         self.assertIn("gate", codex.effort_status)
 
-    def test_claude_defaults_use_fable_5_xhigh_with_opus_48_xhigh_backup(self) -> None:
+    def test_claude_defaults_use_fable_5_high_without_backup(self) -> None:
         runner = load_module(RUNNER_SCRIPT, "run_peer_review")
         with (
             mock.patch.dict("os.environ", {}, clear=True),
@@ -205,19 +205,19 @@ class RunnerTests(unittest.TestCase):
             participant = runner.preflight_participant("claude")
 
         self.assertEqual(participant.requested_model, "claude-fable-5")
-        self.assertEqual(participant.requested_effort, "xhigh")
-        self.assertEqual(participant.fallback_model, "opus")
-        self.assertEqual(participant.fallback_effort, "xhigh")
+        self.assertEqual(participant.requested_effort, "high")
+        self.assertIsNone(participant.fallback_model)
+        self.assertIsNone(participant.fallback_effort)
         self.assertIn("Fable 5", participant.effort_status)
-        self.assertIn("Opus 4.8", participant.effort_status)
+        self.assertIn("fallback disabled", participant.effort_status)
 
-    def test_refresh_defaults_use_fable_5_high_with_matching_opus_backup(self) -> None:
+    def test_refresh_defaults_use_fable_5_high_without_backup(self) -> None:
         refresh = load_module(REFRESH_SCRIPT, "refresh_peer_review_clis")
 
         self.assertEqual(refresh.DEFAULTS["claude"]["model"], "claude-fable-5")
         self.assertEqual(refresh.DEFAULTS["claude"]["effort"], "high")
-        self.assertEqual(refresh.DEFAULTS["claude"]["fallback_model"], "opus")
-        self.assertEqual(refresh.DEFAULTS["claude"]["fallback_effort"], "high")
+        self.assertIsNone(refresh.DEFAULTS["claude"]["fallback_model"])
+        self.assertIsNone(refresh.DEFAULTS["claude"]["fallback_effort"])
 
     def test_claude_fallback_can_be_disabled_without_misreporting_preflight(self) -> None:
         runner = load_module(RUNNER_SCRIPT, "run_peer_review")

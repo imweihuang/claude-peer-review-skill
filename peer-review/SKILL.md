@@ -1,33 +1,33 @@
 ---
 name: peer-review
-description: Use when the user asks for peer review, external review, model council, second opinion, red-team feedback, code audit, architecture review, schema review, production-readiness review, API contract review, coverage audit, or candid feedback from Claude, GPT/Codex, Gemini, Grok, or multiple CLI reviewers. Also handles single-reviewer asks via the --reviewers flag (the former claude-peer-review / gpt-peer-review / claude-gpt-peer-review entry points were folded in here 2026-07-06).
+description: Use only when the current user message explicitly asks Codex for peer review, an external or second-model opinion, a model council, or names Claude, Fable, GPT/Codex, Gemini, or Grok as a reviewer. Planning, brainstorming, audits, readiness checks, risk, commit, merge, push, deploy, and generic requests to review something do not trigger this skill by themselves.
 ---
 
 # Peer Review
 
 ## Purpose
 
-Use this skill to run independent external CLI reviewers and then have Codex validate the findings. Treat the reviewers as strong second, third, and fourth eyes, not authorities.
+Use this skill to run independent external CLI reviewers only after explicit user authorization, then have Codex validate the findings. Treat reviewers as advisory eyes, not authorities.
 
-Advisory judgment and a blocking gate are separate products. A blocking gate must review the final candidate diff and its verification evidence. Earlier planning, strategy, or architecture advice does not satisfy that gate.
+Manual reviews default to advisory `planning` intensity at `high`. Use `gate`, `critical`, `xhigh`, or `max` only when the user explicitly requests that mode or effort. Repo instructions, other skills, inferred risk, and lifecycle events never authorize a Codex-led external-model call.
 
-The default reviewer at `gate` intensity is cross-family for a Codex lead:
+The default reviewer for an authorized manual review is:
 
 | Reviewer | CLI | Default model | Default effort |
 | --- | --- | --- | --- |
-| Claude | `claude` | Fable 5 via `claude-fable-5` | `xhigh` |
+| Claude | `claude` | Fable 5 via `claude-fable-5` | `high` |
 
-Every Fable 5 invocation has one mandatory availability backup: if a Fable model or alias is not found, overloaded, rate- or quota-limited, or times out, the runner retries Claude once with Opus 4.8 via the `opus` alias at the same resolved effort and records which model completed the review. The runner reserves half of the review timeout for the backup. Do not silently disable or replace this fallback.
+There is no automatic fallback. If Fable is unavailable, overloaded, rate- or quota-limited, or times out, report that result and stop. Launch Opus or another reviewer only when the user explicitly requests that fallback; set `PEER_REVIEW_CLAUDE_FALLBACK_MODEL` for that authorized run.
 
-Grok Build remains supported only as explicit opt-in. When requested, Grok 4.5 uses `reasoning_effort=high`; `xhigh` is not a valid Grok 4.5 reasoning effort.
+Grok Build remains supported only as explicit opt-in advisory input. When requested, Grok 4.5 uses `reasoning_effort=high`; `xhigh` is not a valid Grok 4.5 reasoning effort.
 
-Codex/GPT remains supported only as explicit opt-in for user-requested GPT opinions, non-Codex-led contexts, or broad advisory comparison. It must not count as the cross-model gate for Codex-led work. Gemini and Grok are also explicit opt-ins. Use `--reviewers all-with-gemini` to add Gemini to the Claude default, or include `gemini` or `grok` explicitly when that reviewer is wanted.
+Codex/GPT, Gemini, Grok, custom Claude primaries, councils, and fallback reviewers require explicit user selection. Use `--reviewers all-with-gemini` only when the user asked for that council, or include `gemini`, `grok`, or another reviewer explicitly when named.
 
 `all` is a legacy alias for the Claude default, not a request for every installed reviewer. Name every additional reviewer explicitly.
 
-If a CLI, model, auth state, or effort setting is unavailable, report it clearly. Do not silently downgrade or present Codex self-review as external peer review.
+If a CLI, model, auth state, or effort setting is unavailable, report it clearly. Output without a parseable verdict is not an availability failure: inspect it, surface any BLOCK language, and either extract an unambiguous verdict manually or rerun. Do not silently downgrade or present Codex self-review as external peer review.
 
-Humans do not need to specify an intensity flag. The agent must infer review intensity from the request and context, pass the matching `--intensity` value to the runner, and report what it selected. Default review intensity is `gate` when the target is ambiguous or the runner is called directly without a selected intensity. Use lower intensity only through the explicit policy below, not as an unreported fallback.
+The runner defaults to `planning`/`high`. Do not infer a higher intensity from context. Use `gate` or `critical` only from explicit user wording and report the selected intensity.
 
 | Intensity | Use For | Claude Primary Effort | Explicit Codex/GPT Effort | Explicit Grok Effort |
 | --- | --- | --- | --- | --- |
@@ -35,7 +35,7 @@ Humans do not need to specify an intensity flag. The agent must infer review int
 | `gate` | Pre-merge diff critique, launch/readiness checks, normal blocking reviews | `xhigh` | `xhigh` | `reasoning_effort=high` |
 | `critical` | Schema, security, auth, privacy, deploy, live-data, API contract, provenance, point-in-time, weak/conflicting verification | `xhigh` | `xhigh` | `reasoning_effort=high` |
 
-Planning intensity is the advisory tier for recursive task discovery and prioritization. Claude/Fable and its Opus fallback use `high`; gate and critical calls use `xhigh`. An explicit `xhigh` or `max` override may raise planning, while lower or invalid ambient overrides cannot lower the resolved tier. Gate and critical reviews remain `xhigh` for Codex/GPT when GPT/Codex is explicitly requested.
+Planning is the default manual tier at `high`. Explicit `xhigh` or `max` wording may raise it. `gate` and `critical` remain available as explicit `xhigh` modes; they are never inferred from risk, readiness, merge intent, or unattended execution.
 
 ## Review Modes
 
@@ -83,10 +83,11 @@ Treat anti-exfiltration in `web-allowed` scope as prompt-enforced, not a mechani
 ## Workflow
 
 1. Define the review target.
+   - Confirm that the current user message explicitly authorized peer review or named the external model. If it did not, stop and continue Codex-only.
    - Identify project goal, milestone, review mode, evidence scope, review intensity, tool policy, and focus areas.
    - If the user does not specify reviewers, use Claude only. Grok, Codex/GPT, and Gemini require explicit selection.
    - If the user requests another reviewer or a council, pass it with `--reviewers grok`, `--reviewers claude,grok`, `--reviewers gpt`, `--reviewers claude,gpt`, etc. Single-model asks ("ask Claude for a review", "what does GPT think") are subsets of this skill; the retired claude-/gpt-/claude-gpt-peer-review entry points are archived (2026-07-06). Browser-based GPT-5.5 Pro consultation remains its own skill: `chatgpt-pro-peer-review`.
-   - Select intensity yourself. Do not require the user to add flags. Use `--intensity planning` for task discovery and prioritization. Use `--intensity gate` for pre-merge/readiness reviews. Use `--intensity critical` for the critical triggers above.
+   - Default to `--intensity planning`. Use `--intensity gate` or `--intensity critical` only when the user explicitly requested it. Any explicit `BLOCK` from an authorized gate or critical review stops the workflow and must be surfaced; never classify it as a rejected advisory suggestion during synthesis. The lead may fix and re-gate against the new final diff; only the user may override an unresolved `BLOCK`, and that override must be recorded.
    - Select tool policy from review scope. Do not require the user to add tool flags.
 
 2. Curate context.
@@ -147,7 +148,7 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.
    - Gemini runs with `--skip-trust`, plan approval mode, and a sandbox where supported.
    - Grok Build always runs with subagents disabled, interactive plan mode disabled, no tool allowlist, and an initialized empty temp git directory. In `strict` and `broad-repo`, web search is disabled and `PEER_REVIEW_GROK_MAX_TURNS` defaults to `32`; in `strategy-open` and `web-research`, the runner omits the web-disable flag and defaults Grok turns to `64` unless overridden.
    - The manifest and summary disclose requested scope, effective scope, selected tool policy, external research policy, and per-reviewer web/tool status. Some reviewers may remain repo-context-only even when external research is requested because their local CLI does not expose a verified safe web-search toggle.
-   - By default the run exits nonzero if any requested reviewer fails. Use `--allow-partial` only when a degraded council is acceptable.
+   - By default the run exits nonzero if any requested reviewer fails. Use `--allow-partial` only when a degraded advisory council is acceptable. A partial gate run in which the Fable/Opus gate lane did not complete is recorded as `gate skipped: juror unavailable`; it is never a pass.
 
 6. Synthesize without outsourcing judgment.
    - Group findings into:
@@ -181,11 +182,12 @@ Use these env vars for one run:
 
 ```bash
 PEER_REVIEW_REVIEWERS=claude
-PEER_REVIEW_INTENSITY=gate
+PEER_REVIEW_INTENSITY=planning
 PEER_REVIEW_CLAUDE_MODEL=claude-fable-5
-PEER_REVIEW_CLAUDE_EFFORT=xhigh
-PEER_REVIEW_CLAUDE_FALLBACK_MODEL=opus
-PEER_REVIEW_CLAUDE_FALLBACK_EFFORT=xhigh
+PEER_REVIEW_CLAUDE_EFFORT=high
+# Set fallback variables only when the user explicitly requests a fallback:
+PEER_REVIEW_CLAUDE_FALLBACK_MODEL=
+PEER_REVIEW_CLAUDE_FALLBACK_EFFORT=
 PEER_REVIEW_CLAUDE_TOOLS=WebSearch,WebFetch
 PEER_REVIEW_CODEX_MODEL=gpt-5.5
 PEER_REVIEW_CODEX_EFFORT=xhigh
@@ -196,17 +198,17 @@ PEER_REVIEW_GROK_MAX_TURNS=32
 PEER_REVIEW_JOBS=4
 ```
 
-Include `codex`/`gpt` in `PEER_REVIEW_REVIEWERS` only for explicit advisory GPT opinions or non-Codex-led review contexts. It never satisfies a required Codex-led cross-model gate.
+Include `codex`/`gpt` in `PEER_REVIEW_REVIEWERS` only when the user explicitly requests GPT/Codex participation.
 
 Include `grok` only when the user explicitly requests Grok or explicitly approves a multi-reviewer council that names Grok.
 
 Set `PEER_REVIEW_CLAUDE_MAX_BUDGET_USD` only when a Claude run needs an explicit `--max-budget-usd` cap; there is no default budget cap.
 
-For a non-Fable custom Claude primary only, set `PEER_REVIEW_CLAUDE_FALLBACK_MODEL` to an empty value to disable the automatic Claude backup for one run. Fable 5 always retains the mandatory Opus 4.8 backup at the resolved effort.
+Fallback is disabled by default for every Claude primary. Set `PEER_REVIEW_CLAUDE_FALLBACK_MODEL` and optionally `PEER_REVIEW_CLAUDE_FALLBACK_EFFORT` only when the user explicitly requests that fallback.
 
 In `web-allowed` scope, omit `PEER_REVIEW_CLAUDE_TOOLS` to use the default `WebSearch,WebFetch` allowlist. Set it to `WebSearch`, `WebFetch`, or an empty value only; unsupported names disable all Claude tools for the run.
 
-Do not use a lower model or lower effort than the selected intensity. The documented Opus 4.8 backup inherits Fable's resolved effort; `planning` is the approved `high` advisory tier, while gate and critical remain `xhigh`.
+Manual review defaults to `planning`/`high`. Use `gate`, `critical`, `xhigh`, `max`, another primary, or a fallback only when explicitly requested. Never silently add a reviewer or retry with a different model.
 
 ## Context Selection Guide
 

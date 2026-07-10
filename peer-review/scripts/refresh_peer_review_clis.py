@@ -15,8 +15,8 @@ DEFAULTS = {
     "claude": {
         "model": "claude-fable-5",
         "effort": "high",
-        "fallback_model": "opus",
-        "fallback_effort": "high",
+        "fallback_model": None,
+        "fallback_effort": None,
     },
     "codex": {"model": "gpt-5.5", "effort": "xhigh"},
     "gemini": {"model": "cli-default", "effort": "not-cli-exposed"},

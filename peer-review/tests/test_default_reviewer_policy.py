@@ -34,38 +34,37 @@ class DefaultReviewerPolicyTest(unittest.TestCase):
         self.assertEqual(RUNNER.parse_reviewers("claude,grok"), ["claude", "grok"])
 
     @unittest.skipUnless(CANON_PATH.exists(), "shared machine canon is not installed")
-    def test_skill_and_shared_canon_document_grok_as_opt_in(self) -> None:
+    def test_skill_and_shared_canon_document_manual_only_codex_review(self) -> None:
         self.assertIn("Grok Build remains supported only as explicit opt-in", SKILL_PATH.read_text())
         self.assertIn("`all` is a legacy alias for the Claude default", SKILL_PATH.read_text())
-        self.assertIn("Grok review is explicit opt-in", CANON_PATH.read_text())
+        self.assertIn("Codex lead → external-model review is manual-only", CANON_PATH.read_text())
 
-    def test_planning_fable_uses_matching_high_opus_fallback(self) -> None:
+    def test_unspecified_intensity_defaults_to_manual_planning_high(self) -> None:
+        intensity = RUNNER.resolve_review_intensity(None)
+        self.assertEqual(intensity.name, "planning")
+        self.assertEqual(intensity.claude_effort, "high")
+
+    def test_default_fable_review_has_no_automatic_fallback(self) -> None:
         with patch.dict(
             "os.environ",
             {
                 "PEER_REVIEW_CLAUDE_MODEL": RUNNER.DEFAULT_CLAUDE_MODEL,
-                "PEER_REVIEW_CLAUDE_FALLBACK_MODEL": "",
-                "PEER_REVIEW_CLAUDE_FALLBACK_EFFORT": "",
             },
             clear=True,
         ):
-            participant = RUNNER.preflight_participant(
-                "claude", RUNNER.resolve_review_intensity("planning")
-            )
+            participant = RUNNER.preflight_participant("claude")
 
         self.assertEqual(participant.requested_effort, "high")
-        self.assertEqual(participant.fallback_model, "opus")
-        self.assertEqual(participant.fallback_effort, "high")
-        self.assertIn("Opus 4.8 fallback uses --effort high", participant.effort_status)
+        self.assertIsNone(participant.fallback_model)
+        self.assertIsNone(participant.fallback_effort)
+        self.assertIn("fallback disabled", participant.effort_status)
 
-    def test_fable_alias_ignores_lower_effort_and_keeps_mandatory_fallback(self) -> None:
+    def test_fable_alias_ignores_lower_effort_without_adding_fallback(self) -> None:
         with patch.dict(
             "os.environ",
             {
                 "PEER_REVIEW_CLAUDE_MODEL": "claude-fable-5-20260709",
                 "PEER_REVIEW_CLAUDE_EFFORT": "medium",
-                "PEER_REVIEW_CLAUDE_FALLBACK_MODEL": "",
-                "PEER_REVIEW_CLAUDE_FALLBACK_EFFORT": "",
             },
             clear=True,
         ):
@@ -74,11 +73,11 @@ class DefaultReviewerPolicyTest(unittest.TestCase):
             )
 
         self.assertEqual(participant.requested_effort, "high")
-        self.assertEqual(participant.fallback_model, "opus")
-        self.assertEqual(participant.fallback_effort, "high")
+        self.assertIsNone(participant.fallback_model)
+        self.assertIsNone(participant.fallback_effort)
         self.assertIn("ignored effort override medium", participant.effort_status)
 
-    def test_fable_alias_honors_xhigh_override_for_primary_and_fallback(self) -> None:
+    def test_fable_alias_honors_explicit_xhigh_without_adding_fallback(self) -> None:
         with patch.dict(
             "os.environ",
             {
@@ -92,7 +91,21 @@ class DefaultReviewerPolicyTest(unittest.TestCase):
             )
 
         self.assertEqual(participant.requested_effort, "xhigh")
-        self.assertEqual(participant.fallback_effort, "xhigh")
+        self.assertIsNone(participant.fallback_effort)
+
+    def test_explicit_opus_fallback_inherits_resolved_effort(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "PEER_REVIEW_CLAUDE_MODEL": RUNNER.DEFAULT_CLAUDE_MODEL,
+                "PEER_REVIEW_CLAUDE_FALLBACK_MODEL": "opus",
+            },
+            clear=True,
+        ):
+            participant = RUNNER.preflight_participant("claude")
+
+        self.assertEqual(participant.fallback_model, "opus")
+        self.assertEqual(participant.fallback_effort, "high")
 
     def test_invalid_effort_override_is_disclosed_and_uses_planning_floor(self) -> None:
         with patch.dict(
@@ -105,18 +118,37 @@ class DefaultReviewerPolicyTest(unittest.TestCase):
             )
 
         self.assertEqual(participant.requested_effort, "high")
-        self.assertEqual(participant.fallback_effort, "high")
+        self.assertIsNone(participant.fallback_effort)
         self.assertIn("ignored effort override banana", participant.effort_status)
 
     def test_rate_limit_and_quota_errors_trigger_fallback(self) -> None:
         self.assertTrue(RUNNER.should_use_claude_fallback("HTTP 429 rate limit exceeded"))
         self.assertTrue(RUNNER.should_use_claude_fallback("quota exhausted for this model"))
 
-    def test_planning_fable_timeout_runs_matching_high_opus_fallback(self) -> None:
+    def test_default_fable_timeout_does_not_launch_fallback(self) -> None:
         with patch.dict("os.environ", {}, clear=True):
-            participant = RUNNER.preflight_participant(
-                "claude", RUNNER.resolve_review_intensity("planning")
-            )
+            participant = RUNNER.preflight_participant("claude")
+        participant.status = "ready"
+        participant.cli_path = "/fake/claude"
+        primary_timeout = RUNNER.subprocess.TimeoutExpired(
+            cmd=["/fake/claude"], timeout=10, output="", stderr="primary timed out"
+        )
+
+        with tempfile.TemporaryDirectory() as output_dir:
+            with patch.object(RUNNER.subprocess, "run", side_effect=primary_timeout) as run_mock:
+                result = RUNNER.run_participant(
+                    participant, "review input", Path(output_dir), timeout_seconds=10
+                )
+
+        self.assertFalse(result.used_fallback)
+        self.assertEqual(result.status, "timeout")
+        self.assertEqual(run_mock.call_count, 1)
+
+    def test_explicit_fallback_runs_after_timeout(self) -> None:
+        with patch.dict(
+            "os.environ", {"PEER_REVIEW_CLAUDE_FALLBACK_MODEL": "opus"}, clear=True
+        ):
+            participant = RUNNER.preflight_participant("claude")
         participant.status = "ready"
         participant.cli_path = "/fake/claude"
         primary_timeout = RUNNER.subprocess.TimeoutExpired(
@@ -136,36 +168,8 @@ class DefaultReviewerPolicyTest(unittest.TestCase):
 
         self.assertTrue(result.used_fallback)
         self.assertEqual(result.status, "ran")
-        self.assertEqual(result.completed_model, "opus")
-        self.assertEqual(result.completed_effort, "high")
-        self.assertEqual(run_mock.call_count, 2)
-
-    def test_fallback_timeout_still_records_matching_effort(self) -> None:
-        with patch.dict("os.environ", {}, clear=True):
-            participant = RUNNER.preflight_participant(
-                "claude", RUNNER.resolve_review_intensity("planning")
-            )
-        participant.status = "ready"
-        participant.cli_path = "/fake/claude"
-        primary_timeout = RUNNER.subprocess.TimeoutExpired(
-            cmd=["/fake/claude"], timeout=5, output="", stderr="primary timed out"
-        )
-        fallback_timeout = RUNNER.subprocess.TimeoutExpired(
-            cmd=["/fake/claude"], timeout=5, output="", stderr="fallback timed out"
-        )
-
-        with tempfile.TemporaryDirectory() as output_dir:
-            with patch.object(
-                RUNNER.subprocess, "run", side_effect=[primary_timeout, fallback_timeout]
-            ):
-                result = RUNNER.run_participant(
-                    participant, "review input", Path(output_dir), timeout_seconds=10
-                )
-
-        self.assertTrue(result.used_fallback)
-        self.assertEqual(result.status, "timeout")
         self.assertIn("used fallback opus/high", result.notes or "")
-        self.assertIn("timed out", result.notes or "")
+        self.assertEqual(run_mock.call_count, 2)
 
 
 if __name__ == "__main__":
