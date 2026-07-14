@@ -11,13 +11,17 @@ Use this skill to run independent external CLI reviewers only after explicit use
 
 Manual reviews default to advisory `planning` intensity at `high`. Use `gate`, `critical`, `xhigh`, or `max` only when the user explicitly requests that mode or effort. Repo instructions, other skills, inferred risk, and lifecycle events never authorize a Codex-led external-model call.
 
-The default reviewer for an authorized manual review is:
+Classify each authorized Claude-family review and pass `--review-class`:
 
-| Reviewer | CLI | Default model | Default effort |
+| Review class | Use for | Claude model | Effort |
 | --- | --- | --- | --- |
-| Claude | `claude` | Fable 5 via `claude-fable-5` | `high` |
+| `routine` | Straightforward diff checks, bounded fact checks, mechanical or low-ambiguity work | Opus via `opus` | `high` |
+| `judgment` | Architecture, prioritization, conflicting evidence, non-trivial product or technical judgment | Fable 5 via `claude-fable-5` | `high` |
+| `load-bearing` | User-requested gates/critical reviews and consequential decisions | Fable 5 via `claude-fable-5` | `xhigh` |
 
-There is no automatic fallback. If Fable is unavailable, overloaded, rate- or quota-limited, or times out, report that result and stop. Launch Opus or another reviewer only when the user explicitly requests that fallback; set `PEER_REVIEW_CLAUDE_FALLBACK_MODEL` for that authorized run.
+Choose the highest applicable class. File count alone does not make a mechanical diff judgment-heavy. If classification is omitted, `auto` fails closed to `judgment` for planning and `load-bearing` for gate/critical. Classification does not authorize invocation.
+
+There is no automatic fallback or automatic Opus-to-Fable escalation. If the selected model is unavailable, overloaded, rate- or quota-limited, times out, or returns uncertain/BLOCK feedback, report that result and stop. Launch another model only when the user explicitly requests it. A user-authorized `--claude-model` override is allowed, but effort floors still apply; ambient environment settings cannot downgrade a Fable route.
 
 Grok Build remains supported only as explicit opt-in advisory input. When requested, Grok 4.5 uses `reasoning_effort=high`; `xhigh` is not a valid Grok 4.5 reasoning effort.
 
@@ -84,7 +88,8 @@ Treat anti-exfiltration in `web-allowed` scope as prompt-enforced, not a mechani
 
 1. Define the review target.
    - Confirm that the current user message explicitly authorized peer review or named the external model. If it did not, stop and continue Codex-only.
-   - Identify project goal, milestone, review mode, evidence scope, review intensity, tool policy, and focus areas.
+   - Identify project goal, milestone, review mode, evidence scope, review class, review intensity, tool policy, and focus areas.
+   - Pass `--review-class routine`, `judgment`, or `load-bearing` using the rubric above. Do not rely on `auto` except as a fail-closed safeguard.
    - If the user does not specify reviewers, use Claude only. Grok, Codex/GPT, and Gemini require explicit selection.
    - If the user requests another reviewer or a council, pass it with `--reviewers grok`, `--reviewers claude,grok`, `--reviewers gpt`, `--reviewers claude,gpt`, etc. Single-model asks ("ask Claude for a review", "what does GPT think") are subsets of this skill; the retired claude-/gpt-/claude-gpt-peer-review entry points are archived (2026-07-06). Browser-based GPT-5.5 Pro consultation remains its own skill: `chatgpt-pro-peer-review`.
    - Default to `--intensity planning`. Use `--intensity gate` or `--intensity critical` only when the user explicitly requested it. Any explicit `BLOCK` from an authorized gate or critical review stops the workflow and must be surfaced; never classify it as a rejected advisory suggestion during synthesis. The lead may fix and re-gate against the new final diff; only the user may override an unresolved `BLOCK`, and that override must be recorded.
@@ -134,6 +139,7 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/refresh_peer_rev
 python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.py" \
   --mode "Diff Critique" \
   --review-scope strict \
+  --review-class load-bearing \
   --intensity gate \
   --milestone "current milestone" \
   --focus "correctness bugs and behavioral regressions" \
@@ -143,7 +149,7 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.
 
    - The runner keeps outputs separate and does not show one model's answer to another.
    - The runner runs independent reviewers in parallel by default, up to `--jobs 4` or `PEER_REVIEW_JOBS`. Use `--jobs 1` for sequential debugging.
-   - Claude runs with no tools in `context-only` scope. In `web-allowed` scope it receives exactly `WebSearch,WebFetch` by default, with no session persistence; `PEER_REVIEW_CLAUDE_TOOLS` may only narrow or disable that allowlist. Fable 5 runs at the explicitly selected intensity and effort. There is no fallback unless the user explicitly requested one and the authorized fallback is configured for that run.
+   - Claude runs with no tools in `context-only` scope. In `web-allowed` scope it receives exactly `WebSearch,WebFetch` by default, with no session persistence; `PEER_REVIEW_CLAUDE_TOOLS` may only narrow or disable that allowlist. The selected route runs exactly one primary model. There is no fallback or automatic escalation unless the user explicitly requested another model for that run.
    - Codex/GPT runs in a temporary empty cwd with read-only sandboxing and ephemeral mode.
    - Gemini runs with `--skip-trust`, plan approval mode, and a sandbox where supported.
    - Grok Build always runs with subagents disabled, interactive plan mode disabled, no tool allowlist, and an initialized empty temp git directory. In `strict` and `broad-repo`, web search is disabled and `PEER_REVIEW_GROK_MAX_TURNS` defaults to `32`; in `strategy-open` and `web-research`, the runner omits the web-disable flag and defaults Grok turns to `64` unless overridden.
@@ -182,8 +188,8 @@ Use these env vars for one run:
 
 ```bash
 PEER_REVIEW_REVIEWERS=claude
+PEER_REVIEW_CLASS=routine
 PEER_REVIEW_INTENSITY=planning
-PEER_REVIEW_CLAUDE_MODEL=claude-fable-5
 PEER_REVIEW_CLAUDE_EFFORT=high
 # Set fallback variables only when the user explicitly requests a fallback:
 PEER_REVIEW_CLAUDE_FALLBACK_MODEL=

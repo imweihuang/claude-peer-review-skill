@@ -199,7 +199,7 @@ class RunnerTests(unittest.TestCase):
         self.assertIn("planning", codex.effort_status)
         self.assertEqual(
             intensity.note,
-            "planning intensity for advisory task discovery and prioritization; Claude/Fable and explicit Codex/GPT use high",
+            "planning intensity for advisory task discovery and prioritization; Claude routes and explicit Codex/GPT use high",
         )
 
     def test_planning_fable_ignores_lower_effort_override(self) -> None:
@@ -939,14 +939,32 @@ class SkillDocumentationTests(unittest.TestCase):
             self.assertIn("Humans do not need to specify", text)
         self.assertIn("only when I explicitly request external review", metadata_text)
         self.assertIn("Fable 5", metadata_text)
-        self.assertIn("planning/high", metadata_text)
-        self.assertIn("no fallback", metadata_text.lower())
+        self.assertIn("Opus/high", metadata_text)
+        self.assertIn("no automatic fallback", metadata_text.lower())
         self.assertNotIn("default to gate", metadata_text)
         self.assertNotIn("Claude and Grok Build CLI peer reviews by default", readme_text)
         self.assertIn("manual", readme_text.lower())
         self.assertIn("Fable 5", readme_text)
         self.assertIn("`high`", readme_text)
         self.assertNotIn("Opus 4.8 is retried", skill_text)
+
+    def test_peer_review_docs_define_opus_first_routing_policy(self) -> None:
+        skill_text = PEER_REVIEW_SKILL.read_text(encoding="utf-8")
+        readme_text = README.read_text(encoding="utf-8")
+        metadata_text = PEER_REVIEW_METADATA.read_text(encoding="utf-8")
+
+        for text in (skill_text, readme_text, metadata_text):
+            self.assertIn("routine", text)
+            self.assertIn("Opus", text)
+            self.assertIn("judgment", text)
+            self.assertIn("Fable 5", text)
+            self.assertIn("load-bearing", text)
+            self.assertIn("manual", text.lower())
+            self.assertIn("no automatic", text.lower())
+        for text in (skill_text, readme_text):
+            self.assertIn("--review-class", text)
+            self.assertIn("auto", text)
+            self.assertIn("fails closed", text)
 
     def test_peer_review_docs_define_fail_closed_tool_policy(self) -> None:
         skill_text = PEER_REVIEW_SKILL.read_text(encoding="utf-8")

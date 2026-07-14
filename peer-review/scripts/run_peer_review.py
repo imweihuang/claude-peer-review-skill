@@ -353,7 +353,7 @@ def resolve_review_intensity(raw: str | None) -> ReviewIntensity:
             claude_effort=DEFAULT_CLAUDE_EFFORT,
             codex_effort="high",
             grok_reasoning_effort="high",
-            note="planning intensity for advisory task discovery and prioritization; Claude/Fable and explicit Codex/GPT use high",
+            note="planning intensity for advisory task discovery and prioritization; Claude routes and explicit Codex/GPT use high",
         )
     if raw == "gate":
         return ReviewIntensity(
