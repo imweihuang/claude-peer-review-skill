@@ -4,9 +4,9 @@ This repository contains Codex skills for safe external software peer review.
 
 Primary skill:
 
-- `peer-review`: manually run Claude Fable 5 at planning/high by default, with
-  no fallback; additional reviewers, higher effort, and gate modes are explicit
-  opt-ins, after which Codex validates the findings.
+- `peer-review`: manually route routine Claude reviews to Opus/high, judgment
+  reviews to Fable 5/high, and load-bearing reviews to Fable 5/xhigh, with no
+  automatic fallback or escalation; Codex validates the findings.
 
 Compatibility entry points:
 
@@ -30,16 +30,20 @@ External reviewers propose candidates and critiques. Codex verifies them against
 ## Defaults
 
 The skill runs only after an explicit request for external or second-model
-review. Humans do not need to specify `--intensity` for a normal manual call:
-the default is `planning`, and the runner reports what it selected.
+review. Classification never authorizes invocation. Humans do not need to
+specify `--intensity`; the runner reports the selected class, model, and effort.
 
-| Reviewer | CLI | Default model | Default effort |
-| --- | --- | --- | --- |
-| Claude | `claude` | Fable 5 via `claude-fable-5` | `high` |
+| Review class | Claude model | Effort |
+| --- | --- | --- |
+| `routine` | Opus via `opus` | `high` |
+| `judgment` | Fable 5 via `claude-fable-5` | `high` |
+| `load-bearing` | Fable 5 via `claude-fable-5` | `xhigh` |
 
-There is no automatic fallback. If Fable 5 is unavailable, overloaded, rate-
-or quota-limited, or times out, the run reports that result and stops. Opus or
-another fallback runs only when the user explicitly requests it. Codex/GPT,
+Choose the highest applicable class; large mechanical diffs may remain routine.
+`auto` fails closed to judgment for planning and load-bearing for gate/critical.
+There is no automatic fallback or automatic Opus-to-Fable escalation. If the
+selected model fails or is uncertain, the run reports that result and stops.
+Another model runs only when the user explicitly requests it. Codex/GPT,
 Gemini, and Grok Build are also explicit opt-ins. Grok 4.5 (`grok-4.5`)
 supports `low`, `medium`, and `high` reasoning effort; `high` is the highest
 supported value.
@@ -136,6 +140,7 @@ Run a targeted review:
 python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.py" \
   --mode "Diff Critique" \
   --review-scope strict \
+  --review-class load-bearing \
   --intensity gate \
   --milestone "current milestone" \
   --focus "correctness bugs and behavioral regressions" \
@@ -146,6 +151,8 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/peer-review/scripts/run_peer_review.
 `--review-scope` controls evidence policy. Use `strict` for implementation, launch, schema, security, and diff reviews; `broad-repo` for internal architecture reviews needing wider curated context; `strategy-open` or `web-research` for open-ended/current-info questions where external source discovery may help. The runner's default `auto` fails closed to `strict`; the skill should pass an explicit scope after reading the user's request.
 
 `--intensity` controls effort policy. Use `planning` for recursive queue discovery and task prioritization, `gate` for pre-merge/readiness checks, and `critical` for high-risk schema, security, deploy, live-data, API, provenance, point-in-time, or weak/conflicting verification decisions.
+
+`--review-class` controls Claude-family routing: `routine` selects Opus/high, `judgment` selects Fable 5/high, and `load-bearing` selects Fable 5/xhigh. Use `--claude-model` only for an explicit user-authorized override; effort floors still apply.
 
 Humans do not need to specify tool flags. Tool policy is inferred from `--review-scope`: `strict`, `broad-repo`, and fallback `auto` use `context-only`; `strategy-open` and `web-research` use `web-allowed`. `context-only` means curated context only. `web-allowed` gives Claude exactly `WebSearch,WebFetch` by default and enables Grok's built-in web search. Generic tools, reviewer local repo browsing, and write/action tools are never allowed. `PEER_REVIEW_CLAUDE_TOOLS` may only narrow Claude to `WebSearch`, `WebFetch`, or neither; unsupported names fail closed with Claude tools disabled.
 

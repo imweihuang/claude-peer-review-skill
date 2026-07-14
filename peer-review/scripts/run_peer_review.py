@@ -33,6 +33,8 @@ REVIEWER_ALIASES = {
 }
 DEFAULT_GROK_MAX_TURNS = "32"
 DEFAULT_GROK_WEB_MAX_TURNS = "64"
+ROUTINE_CLAUDE_MODEL = "opus"
+FABLE_CLAUDE_MODEL = "claude-fable-5"
 DEFAULT_CLAUDE_MODEL = "claude-fable-5"
 DEFAULT_CLAUDE_EFFORT = "high"
 DEFAULT_CLAUDE_FALLBACK_MODEL = "opus"
@@ -42,6 +44,7 @@ CLAUDE_EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
 REVIEW_SCOPES = ("auto", "strict", "broad-repo", "strategy-open", "web-research")
 WEB_RESEARCH_SCOPES = {"strategy-open", "web-research"}
 REVIEW_INTENSITIES = ("planning", "gate", "critical")
+REVIEW_CLASSES = ("auto", "routine", "judgment", "load-bearing")
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 NOTE_PRIORITY_NEEDLES = (
     "error:",
@@ -109,6 +112,18 @@ class ReviewIntensity:
 
 
 @dataclass(frozen=True)
+class ClaudeRoute:
+    requested_class: str
+    effective_class: str
+    model: str
+    model_source: str
+    effort: str
+    effort_source: str
+    defaulted: bool
+    note: str
+
+
+@dataclass(frozen=True)
 class ToolPolicy:
     name: str
     web_research_allowed: bool
@@ -150,6 +165,26 @@ def main() -> int:
             "Review effort preset. Manual reviews default to planning/high; gate and critical are explicit xhigh modes."
         ),
     )
+    parser.add_argument(
+        "--review-class",
+        default=os.environ.get("PEER_REVIEW_CLASS", "auto"),
+        choices=REVIEW_CLASSES,
+        help=(
+            "Claude-family routing class. routine uses Opus/high, judgment uses Fable 5/high, "
+            "and load-bearing uses Fable 5/xhigh. auto fails closed."
+        ),
+    )
+    parser.add_argument(
+        "--claude-model",
+        default=None,
+        help="Explicit user-authorized Claude model override; takes precedence over route and environment.",
+    )
+    parser.add_argument(
+        "--claude-effort",
+        default=None,
+        choices=CLAUDE_EFFORT_LEVELS,
+        help="Explicit Claude effort override. Route and intensity floors still apply.",
+    )
     parser.add_argument("--project", default=None, help="Project name for the review prompt.")
     parser.add_argument("--milestone", default="current milestone", help="Milestone or launch gate under review.")
     parser.add_argument("--focus", action="append", default=[], help="Focus area. May be repeated.")
@@ -183,7 +218,13 @@ def main() -> int:
     root = Path(args.root).resolve()
     reviewers = parse_reviewers(args.reviewers)
     review_intensity = resolve_review_intensity(args.intensity)
-    participants = [preflight_participant(key, review_intensity) for key in reviewers]
+    claude_route = resolve_claude_route(
+        args.review_class,
+        review_intensity,
+        cli_model=args.claude_model,
+        cli_effort=args.claude_effort,
+    )
+    participants = [preflight_participant(key, review_intensity, claude_route) for key in reviewers]
     review_policy = resolve_review_policy(args.review_scope)
     tool_policy = resolve_tool_policy(review_policy)
     apply_review_policy(participants, review_policy, tool_policy)
@@ -195,6 +236,7 @@ def main() -> int:
             dry_run=True,
             review_policy=review_policy,
             review_intensity=review_intensity,
+            claude_route=claude_route,
             tool_policy=tool_policy,
         )
         return 0 if all(p.status == "ready" for p in participants) else 2
@@ -217,6 +259,7 @@ def main() -> int:
         "mode": args.mode,
         "review_scope": review_policy_manifest(review_policy),
         "review_intensity": review_intensity_manifest(review_intensity),
+        "review_class": review_class_manifest(claude_route),
         "tool_policy": tool_policy_manifest(tool_policy),
         "project": args.project or root.name,
         "milestone": args.milestone,
@@ -234,6 +277,7 @@ def main() -> int:
         dry_run=False,
         review_policy=review_policy,
         review_intensity=review_intensity,
+        claude_route=claude_route,
         tool_policy=tool_policy,
     )
     return run_exit_code(results, args.allow_partial)
@@ -309,7 +353,7 @@ def resolve_review_intensity(raw: str | None) -> ReviewIntensity:
             claude_effort=DEFAULT_CLAUDE_EFFORT,
             codex_effort="high",
             grok_reasoning_effort="high",
-            note="planning intensity for advisory task discovery and prioritization; Claude/Fable and explicit Codex/GPT use high",
+            note="planning intensity for advisory task discovery and prioritization; Claude routes and explicit Codex/GPT use high",
         )
     if raw == "gate":
         return ReviewIntensity(
@@ -330,6 +374,76 @@ def resolve_review_intensity(raw: str | None) -> ReviewIntensity:
 
 def review_intensity_manifest(intensity: ReviewIntensity) -> dict[str, object]:
     return asdict(intensity)
+
+
+def review_class_manifest(route: ClaudeRoute) -> dict[str, object]:
+    return asdict(route)
+
+
+def resolve_claude_route(
+    requested_class: str,
+    intensity: ReviewIntensity,
+    cli_model: str | None = None,
+    cli_effort: str | None = None,
+) -> ClaudeRoute:
+    if requested_class not in REVIEW_CLASSES:
+        raise argparse.ArgumentTypeError(
+            f"unknown review class {requested_class!r}; expected one of {', '.join(REVIEW_CLASSES)}"
+        )
+
+    defaulted = requested_class == "auto"
+    effective_class = "judgment" if defaulted else requested_class
+    if intensity.name in {"gate", "critical"}:
+        effective_class = "load-bearing"
+
+    if effective_class == "routine":
+        route_model = ROUTINE_CLAUDE_MODEL
+        route_effort = DEFAULT_CLAUDE_EFFORT
+    elif effective_class == "judgment":
+        route_model = FABLE_CLAUDE_MODEL
+        route_effort = DEFAULT_CLAUDE_EFFORT
+    else:
+        route_model = FABLE_CLAUDE_MODEL
+        route_effort = "xhigh"
+    route_effort = effort_at_least(route_effort, intensity.claude_effort)
+
+    notes = []
+    if defaulted:
+        notes.append(f"missing class failed closed to {effective_class}")
+
+    environment_model = os.environ.get("PEER_REVIEW_CLAUDE_MODEL", "").strip()
+    if cli_model:
+        model = cli_model
+        model_source = "cli"
+    elif environment_model:
+        if is_fable_model(route_model) and not is_fable_model(environment_model):
+            model = route_model
+            model_source = "route"
+            notes.append(f"rejected environment model override {environment_model}")
+        else:
+            model = environment_model
+            model_source = "environment"
+    else:
+        model = route_model
+        model_source = "route"
+
+    environment_effort = os.environ.get("PEER_REVIEW_CLAUDE_EFFORT", "").strip()
+    requested_effort = cli_effort if cli_effort is not None else environment_effort or None
+    effort = effort_at_least(route_effort, requested_effort)
+    effort_source = "cli" if cli_effort is not None else "environment" if environment_effort else "route"
+    if requested_effort and requested_effort != effort:
+        notes.append(f"ignored effort override {requested_effort}; floor is {effort}")
+
+    return ClaudeRoute(
+        requested_class=requested_class,
+        effective_class=effective_class,
+        model=model,
+        model_source=model_source,
+        effort=effort,
+        effort_source=effort_source,
+        defaulted=defaulted,
+        note="; ".join(notes) or f"{effective_class} route selected",
+    )
 
 
 def resolve_tool_policy(policy: ReviewPolicy) -> ToolPolicy:
@@ -424,34 +538,23 @@ def effort_at_least(base: str, requested: str | None) -> str:
     return requested
 
 
-def preflight_participant(key: str, intensity: ReviewIntensity | None = None) -> Participant:
+def preflight_participant(
+    key: str,
+    intensity: ReviewIntensity | None = None,
+    claude_route: ClaudeRoute | None = None,
+) -> Participant:
     selected_intensity = intensity or resolve_review_intensity(None)
     if key == "claude":
-        model = os.environ.get("PEER_REVIEW_CLAUDE_MODEL", DEFAULT_CLAUDE_MODEL)
+        route = claude_route or resolve_claude_route("auto", selected_intensity)
+        model = route.model
         fable_primary = is_fable_model(model)
-        override_note = ""
-        if fable_primary:
-            requested_effort = os.environ.get("PEER_REVIEW_CLAUDE_EFFORT")
-            effort = effort_at_least(
-                selected_intensity.claude_effort,
-                requested_effort,
-            )
-            if requested_effort and requested_effort != effort:
-                override_note = f"; ignored effort override {requested_effort}; floor is {effort}"
-            fallback_model = os.environ.get("PEER_REVIEW_CLAUDE_FALLBACK_MODEL", "").strip() or None
-            fallback_effort = (
-                os.environ.get("PEER_REVIEW_CLAUDE_FALLBACK_EFFORT", effort).strip() or None
-                if fallback_model
-                else None
-            )
-        else:
-            effort = os.environ.get("PEER_REVIEW_CLAUDE_EFFORT", selected_intensity.claude_effort)
-            fallback_model = os.environ.get("PEER_REVIEW_CLAUDE_FALLBACK_MODEL", "").strip() or None
-            fallback_effort = (
-                os.environ.get("PEER_REVIEW_CLAUDE_FALLBACK_EFFORT", effort).strip() or None
-                if fallback_model
-                else None
-            )
+        effort = route.effort
+        fallback_model = os.environ.get("PEER_REVIEW_CLAUDE_FALLBACK_MODEL", "").strip() or None
+        fallback_effort = (
+            effort_at_least(effort, os.environ.get("PEER_REVIEW_CLAUDE_FALLBACK_EFFORT", effort).strip() or None)
+            if fallback_model
+            else None
+        )
         primary_label = "Fable 5" if fable_primary else model
         fallback_status = (
             f"Opus 4.8 fallback uses --effort {fallback_effort}"
@@ -467,8 +570,10 @@ def preflight_participant(key: str, intensity: ReviewIntensity | None = None) ->
             model=model,
             effort=effort,
             effort_status=(
-                f"{selected_intensity.name} intensity requested with {primary_label} --effort {effort}; "
-                f"{fallback_status}{override_note}"
+                f"{selected_intensity.name} intensity with {route.effective_class} route selected "
+                f"{primary_label} --effort {effort}; "
+                f"model source {route.model_source}; effort source {route.effort_source}; "
+                f"{fallback_status}; {route.note}"
             ),
             fallback_model=fallback_model,
             fallback_effort=fallback_effort,
@@ -1088,6 +1193,7 @@ def print_summary(
     dry_run: bool,
     review_policy: ReviewPolicy | None = None,
     review_intensity: ReviewIntensity | None = None,
+    claude_route: ClaudeRoute | None = None,
     tool_policy: ToolPolicy | None = None,
 ) -> None:
     title = "Peer Review Dry Run" if dry_run else "Peer Review Run"
@@ -1102,6 +1208,12 @@ def print_summary(
         )
     if review_intensity:
         print(f"Review intensity: `{review_intensity.name}`; {review_intensity.note}")
+    if claude_route:
+        print(
+            f"Review class: requested `{claude_route.requested_class}`, effective `{claude_route.effective_class}`; "
+            f"model `{claude_route.model}` from `{claude_route.model_source}`; "
+            f"effort `{claude_route.effort}` from `{claude_route.effort_source}`; {claude_route.note}"
+        )
     if tool_policy:
         print(f"Tool policy: `{tool_policy.name}`; {tool_policy.note}")
     print()

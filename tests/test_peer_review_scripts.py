@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import io
+import os
 import subprocess
 import sys
 import tempfile
@@ -8,6 +10,7 @@ import threading
 import time
 import unittest
 from unittest import mock
+from contextlib import redirect_stdout
 from pathlib import Path
 
 
@@ -103,6 +106,80 @@ class ContextBuilderTests(unittest.TestCase):
 
 
 class RunnerTests(unittest.TestCase):
+    def test_review_class_manifest_discloses_route(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+        with mock.patch.dict("os.environ", {}, clear=True):
+            route = runner.resolve_claude_route(
+                "routine", runner.resolve_review_intensity("planning")
+            )
+
+        manifest = runner.review_class_manifest(route)
+
+        self.assertEqual(manifest["requested_class"], "routine")
+        self.assertEqual(manifest["effective_class"], "routine")
+        self.assertEqual(manifest["model"], "opus")
+        self.assertEqual(manifest["model_source"], "route")
+        self.assertEqual(manifest["effort"], "high")
+        self.assertFalse(manifest["defaulted"])
+
+    def test_cli_model_and_effort_override_environment_with_disclosure(self) -> None:
+        env = os.environ.copy()
+        env.update(
+            {
+                "PEER_REVIEW_CLAUDE_MODEL": "claude-fable-5",
+                "PEER_REVIEW_CLAUDE_EFFORT": "low",
+            }
+        )
+        result = subprocess.run(
+            [
+                "python3",
+                str(RUNNER_SCRIPT),
+                "--reviewers",
+                "claude",
+                "--review-class",
+                "routine",
+                "--claude-model",
+                "opus",
+                "--claude-effort",
+                "max",
+                "--review-scope",
+                "strict",
+                "--preflight",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+            env=env,
+        )
+
+        self.assertIn(result.returncode, (0, 2))
+        self.assertIn("Review class: requested `routine`, effective `routine`", result.stdout)
+        self.assertIn("model `opus` from `cli`", result.stdout)
+        self.assertIn("effort `max` from `cli`", result.stdout)
+
+    def test_summary_discloses_route_instead_of_intensity_only(self) -> None:
+        runner = load_module(RUNNER_SCRIPT, "run_peer_review")
+        intensity = runner.resolve_review_intensity("planning")
+        with mock.patch.dict("os.environ", {}, clear=True):
+            route = runner.resolve_claude_route("routine", intensity)
+        participant = runner.Participant(
+            "claude", "Claude", "claude", None, None, "opus", "high", "route", "missing"
+        )
+        rendered = io.StringIO()
+
+        with redirect_stdout(rendered):
+            runner.print_summary(
+                [participant],
+                output_dir=None,
+                dry_run=True,
+                review_intensity=intensity,
+                claude_route=route,
+            )
+
+        self.assertIn("Review class: requested `routine`, effective `routine`", rendered.getvalue())
+        self.assertIn("model `opus` from `route`; effort `high` from `route`", rendered.getvalue())
+
     def test_planning_intensity_uses_high_for_fable_and_codex(self) -> None:
         runner = load_module(RUNNER_SCRIPT, "run_peer_review")
         intensity = runner.resolve_review_intensity("planning")
@@ -122,7 +199,7 @@ class RunnerTests(unittest.TestCase):
         self.assertIn("planning", codex.effort_status)
         self.assertEqual(
             intensity.note,
-            "planning intensity for advisory task discovery and prioritization; Claude/Fable and explicit Codex/GPT use high",
+            "planning intensity for advisory task discovery and prioritization; Claude routes and explicit Codex/GPT use high",
         )
 
     def test_planning_fable_ignores_lower_effort_override(self) -> None:
@@ -211,11 +288,13 @@ class RunnerTests(unittest.TestCase):
         self.assertIn("Fable 5", participant.effort_status)
         self.assertIn("fallback disabled", participant.effort_status)
 
-    def test_refresh_defaults_use_fable_5_high_without_backup(self) -> None:
+    def test_refresh_defaults_disclose_opus_routine_and_fable_reserved_routes(self) -> None:
         refresh = load_module(REFRESH_SCRIPT, "refresh_peer_review_clis")
 
-        self.assertEqual(refresh.DEFAULTS["claude"]["model"], "claude-fable-5")
+        self.assertEqual(refresh.DEFAULTS["claude"]["model"], "opus")
         self.assertEqual(refresh.DEFAULTS["claude"]["effort"], "high")
+        self.assertEqual(refresh.DEFAULTS["claude"]["reserved_model"], "claude-fable-5")
+        self.assertEqual(refresh.DEFAULTS["claude"]["reserved_efforts"], ("high", "xhigh"))
         self.assertIsNone(refresh.DEFAULTS["claude"]["fallback_model"])
         self.assertIsNone(refresh.DEFAULTS["claude"]["fallback_effort"])
 
@@ -860,14 +939,32 @@ class SkillDocumentationTests(unittest.TestCase):
             self.assertIn("Humans do not need to specify", text)
         self.assertIn("only when I explicitly request external review", metadata_text)
         self.assertIn("Fable 5", metadata_text)
-        self.assertIn("planning/high", metadata_text)
-        self.assertIn("no fallback", metadata_text.lower())
+        self.assertIn("Opus/high", metadata_text)
+        self.assertIn("no automatic fallback", metadata_text.lower())
         self.assertNotIn("default to gate", metadata_text)
         self.assertNotIn("Claude and Grok Build CLI peer reviews by default", readme_text)
         self.assertIn("manual", readme_text.lower())
         self.assertIn("Fable 5", readme_text)
         self.assertIn("`high`", readme_text)
         self.assertNotIn("Opus 4.8 is retried", skill_text)
+
+    def test_peer_review_docs_define_opus_first_routing_policy(self) -> None:
+        skill_text = PEER_REVIEW_SKILL.read_text(encoding="utf-8")
+        readme_text = README.read_text(encoding="utf-8")
+        metadata_text = PEER_REVIEW_METADATA.read_text(encoding="utf-8")
+
+        for text in (skill_text, readme_text, metadata_text):
+            self.assertIn("routine", text)
+            self.assertIn("Opus", text)
+            self.assertIn("judgment", text)
+            self.assertIn("Fable 5", text)
+            self.assertIn("load-bearing", text)
+            self.assertIn("manual", text.lower())
+            self.assertIn("no automatic", text.lower())
+        for text in (skill_text, readme_text):
+            self.assertIn("--review-class", text)
+            self.assertIn("auto", text)
+            self.assertIn("fails closed", text)
 
     def test_peer_review_docs_define_fail_closed_tool_policy(self) -> None:
         skill_text = PEER_REVIEW_SKILL.read_text(encoding="utf-8")

@@ -1,4 +1,4 @@
 interface:
   display_name: "Peer Review"
   short_description: "Manually run a safe external-model peer review"
-  default_prompt: "Use $peer-review only when I explicitly request external review. Default to Claude Fable 5 at planning/high with no fallback; add reviewers, gate/critical intensity, higher effort, web access, or a fallback only when I explicitly request them."
+  default_prompt: "Use $peer-review only when I explicitly request external review. Classify manual Claude-family reviews: routine uses Opus/high, judgment uses Fable 5/high, and load-bearing uses Fable 5/xhigh. Classification never authorizes invocation. There is no automatic fallback or Opus-to-Fable escalation; add reviewers or override the model only when I explicitly request them."

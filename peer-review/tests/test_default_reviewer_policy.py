@@ -46,6 +46,73 @@ class DefaultReviewerPolicyTest(unittest.TestCase):
         self.assertEqual(intensity.name, "planning")
         self.assertEqual(intensity.claude_effort, "high")
 
+    def test_claude_route_matrix(self) -> None:
+        cases = {
+            ("auto", "planning"): ("judgment", "claude-fable-5", "high", True),
+            ("routine", "planning"): ("routine", "opus", "high", False),
+            ("judgment", "planning"): ("judgment", "claude-fable-5", "high", False),
+            ("load-bearing", "planning"): ("load-bearing", "claude-fable-5", "xhigh", False),
+            ("routine", "gate"): ("load-bearing", "claude-fable-5", "xhigh", False),
+            ("judgment", "critical"): ("load-bearing", "claude-fable-5", "xhigh", False),
+        }
+        for (review_class, intensity_name), expected in cases.items():
+            with self.subTest(review_class=review_class, intensity=intensity_name):
+                with patch.dict("os.environ", {}, clear=True):
+                    route = RUNNER.resolve_claude_route(
+                        review_class,
+                        RUNNER.resolve_review_intensity(intensity_name),
+                    )
+                self.assertEqual(
+                    (route.effective_class, route.model, route.effort, route.defaulted),
+                    expected,
+                )
+
+    def test_cli_opus_override_keeps_gate_floor(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            route = RUNNER.resolve_claude_route(
+                "routine",
+                RUNNER.resolve_review_intensity("gate"),
+                cli_model="opus",
+            )
+
+        self.assertEqual(
+            (route.model, route.model_source, route.effort),
+            ("opus", "cli", "xhigh"),
+        )
+
+    def test_environment_opus_cannot_downgrade_load_bearing(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"PEER_REVIEW_CLAUDE_MODEL": "opus"},
+            clear=True,
+        ):
+            route = RUNNER.resolve_claude_route(
+                "load-bearing",
+                RUNNER.resolve_review_intensity("planning"),
+            )
+
+        self.assertEqual(
+            (route.model, route.model_source),
+            ("claude-fable-5", "route"),
+        )
+        self.assertIn("rejected environment model override", route.note)
+
+    def test_environment_fable_can_strengthen_routine_route(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"PEER_REVIEW_CLAUDE_MODEL": "claude-fable-5"},
+            clear=True,
+        ):
+            route = RUNNER.resolve_claude_route(
+                "routine",
+                RUNNER.resolve_review_intensity("planning"),
+            )
+
+        self.assertEqual(
+            (route.model, route.model_source, route.effort),
+            ("claude-fable-5", "environment", "high"),
+        )
+
     def test_default_fable_review_has_no_automatic_fallback(self) -> None:
         with patch.dict(
             "os.environ",
