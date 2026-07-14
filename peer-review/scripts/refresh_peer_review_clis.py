@@ -13,8 +13,10 @@ from datetime import datetime, timezone
 
 DEFAULTS = {
     "claude": {
-        "model": "claude-fable-5",
+        "model": "opus",
         "effort": "high",
+        "reserved_model": "claude-fable-5",
+        "reserved_efforts": ("high", "xhigh"),
         "fallback_model": None,
         "fallback_effort": None,
     },
@@ -189,7 +191,7 @@ def claude_model_report() -> ModelReport:
     )
     status = "confirmed" if effort_ok and model_ok and policy_flags_ok else "needs_manual_check"
     evidence = (
-        "`claude --help` exposes the configured models, effort, policy-critical flags, and empty --tools disable semantics"
+        "`claude --help` confirms Opus/high for routine routing plus Fable 5 high/xhigh reserved routing, policy-critical flags, and empty --tools disable semantics"
         if status == "confirmed"
         else "`claude --help` did not confirm all model, effort, and policy-critical tool/session controls"
     )
