@@ -33,6 +33,8 @@ REVIEWER_ALIASES = {
 }
 DEFAULT_GROK_MAX_TURNS = "32"
 DEFAULT_GROK_WEB_MAX_TURNS = "64"
+ROUTINE_CLAUDE_MODEL = "opus"
+FABLE_CLAUDE_MODEL = "claude-fable-5"
 DEFAULT_CLAUDE_MODEL = "claude-fable-5"
 DEFAULT_CLAUDE_EFFORT = "high"
 DEFAULT_CLAUDE_FALLBACK_MODEL = "opus"
@@ -42,6 +44,7 @@ CLAUDE_EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
 REVIEW_SCOPES = ("auto", "strict", "broad-repo", "strategy-open", "web-research")
 WEB_RESEARCH_SCOPES = {"strategy-open", "web-research"}
 REVIEW_INTENSITIES = ("planning", "gate", "critical")
+REVIEW_CLASSES = ("auto", "routine", "judgment", "load-bearing")
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 NOTE_PRIORITY_NEEDLES = (
     "error:",
@@ -105,6 +108,18 @@ class ReviewIntensity:
     claude_effort: str
     codex_effort: str
     grok_reasoning_effort: str
+    note: str
+
+
+@dataclass(frozen=True)
+class ClaudeRoute:
+    requested_class: str
+    effective_class: str
+    model: str
+    model_source: str
+    effort: str
+    effort_source: str
+    defaulted: bool
     note: str
 
 
@@ -330,6 +345,72 @@ def resolve_review_intensity(raw: str | None) -> ReviewIntensity:
 
 def review_intensity_manifest(intensity: ReviewIntensity) -> dict[str, object]:
     return asdict(intensity)
+
+
+def resolve_claude_route(
+    requested_class: str,
+    intensity: ReviewIntensity,
+    cli_model: str | None = None,
+    cli_effort: str | None = None,
+) -> ClaudeRoute:
+    if requested_class not in REVIEW_CLASSES:
+        raise argparse.ArgumentTypeError(
+            f"unknown review class {requested_class!r}; expected one of {', '.join(REVIEW_CLASSES)}"
+        )
+
+    defaulted = requested_class == "auto"
+    effective_class = "judgment" if defaulted else requested_class
+    if intensity.name in {"gate", "critical"}:
+        effective_class = "load-bearing"
+
+    if effective_class == "routine":
+        route_model = ROUTINE_CLAUDE_MODEL
+        route_effort = DEFAULT_CLAUDE_EFFORT
+    elif effective_class == "judgment":
+        route_model = FABLE_CLAUDE_MODEL
+        route_effort = DEFAULT_CLAUDE_EFFORT
+    else:
+        route_model = FABLE_CLAUDE_MODEL
+        route_effort = "xhigh"
+    route_effort = effort_at_least(route_effort, intensity.claude_effort)
+
+    notes = []
+    if defaulted:
+        notes.append(f"missing class failed closed to {effective_class}")
+
+    environment_model = os.environ.get("PEER_REVIEW_CLAUDE_MODEL", "").strip()
+    if cli_model:
+        model = cli_model
+        model_source = "cli"
+    elif environment_model:
+        if is_fable_model(route_model) and not is_fable_model(environment_model):
+            model = route_model
+            model_source = "route"
+            notes.append(f"rejected environment model override {environment_model}")
+        else:
+            model = environment_model
+            model_source = "environment"
+    else:
+        model = route_model
+        model_source = "route"
+
+    environment_effort = os.environ.get("PEER_REVIEW_CLAUDE_EFFORT", "").strip()
+    requested_effort = cli_effort if cli_effort is not None else environment_effort or None
+    effort = effort_at_least(route_effort, requested_effort)
+    effort_source = "cli" if cli_effort is not None else "environment" if environment_effort else "route"
+    if requested_effort and requested_effort != effort:
+        notes.append(f"ignored effort override {requested_effort}; floor is {effort}")
+
+    return ClaudeRoute(
+        requested_class=requested_class,
+        effective_class=effective_class,
+        model=model,
+        model_source=model_source,
+        effort=effort,
+        effort_source=effort_source,
+        defaulted=defaulted,
+        note="; ".join(notes) or f"{effective_class} route selected",
+    )
 
 
 def resolve_tool_policy(policy: ReviewPolicy) -> ToolPolicy:
